@@ -1,0 +1,695 @@
+/* =====================================================================
+ * Cursor-like three-column workspace
+ *
+ *   [left file explorer] | [middle document reader] | [right chat]
+ *
+ * Loaded after product.css — this file owns the final layout for the
+ * new columns and the generic expandable directory tree. Older layout
+ * rules that target removed markup (#action-rail, #doc-columns,
+ * workspace modes, ...) simply go unused.
+ * ===================================================================== */
+
+:root {
+  --sidebar-width-default: clamp(210px, 18vw, 300px);
+  --doc-content-font-size: var(--md-font-size, 15px);
+}
+
+/* ---------- body / shell ---------- */
+
+body {
+  min-width: 0;
+}
+
+.boot-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#sidebar {
+  flex: 0 0 auto;
+  width: var(--sidebar-width-default);
+  min-width: 180px;
+  max-width: 360px;
+}
+
+#sidebar.collapsed {
+  width: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  flex-basis: auto !important;
+}
+
+#explorer-resize {
+  width: 6px;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    var(--resize-divider) 2px,
+    var(--resize-divider) 4px,
+    transparent 4px
+  );
+}
+
+#explorer-resize:hover,
+#explorer-resize.dragging {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    var(--accent) 2px,
+    var(--accent) 4px,
+    transparent 4px
+  );
+}
+
+/* ---------- sidebar / left explorer ---------- */
+
+#sidebar-header {
+  padding: var(--space-3) var(--space-2) var(--space-3);
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: var(--space-2);
+}
+
+#file-explorer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+.file-root-tab:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.file-root-tab.active {
+  background: var(--toolbar-menu-selected-bg);
+  color: var(--text1);
+  font-weight: 500;
+}
+
+#file-root-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 5px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.file-root-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 0 1 auto;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.file-root-tab:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.file-root-tab.active {
+  background: var(--toolbar-menu-selected-bg);
+  color: var(--text1);
+  font-weight: 500;
+}
+
+.file-root-tab-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.file-root-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-refresh-btn {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+}
+
+#file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 6px 14px;
+}
+
+.file-tree-empty {
+  padding: 18px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 8px 0 6px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text2);
+  white-space: nowrap;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.file-tree-row:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.file-tree-row.active {
+  background: var(--toolbar-menu-selected-bg);
+  color: var(--text1);
+  font-weight: 500;
+}
+
+.tree-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.tree-chevron i {
+  width: 13px;
+  height: 13px;
+}
+
+.tree-chevron.open {
+  transform: rotate(90deg);
+}
+
+.tree-chevron-placeholder {
+  visibility: hidden;
+}
+
+.tree-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.tree-icon i {
+  width: 15px;
+  height: 15px;
+}
+
+.file-tree-row.active .tree-icon,
+.file-tree-row:hover .tree-icon {
+  color: var(--text2);
+}
+
+.tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#sidebar.collapsed #file-explorer,
+#sidebar.collapsed .sidebar-brand h1 {
+  display: none;
+}
+
+/* ---------- main shell: document | chat ---------- */
+
+#main-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------- middle: document reader ---------- */
+
+#document-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+#document-panel #doc-tabs {
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+#document-panel #doc-preview-toolbar {
+  flex: 0 0 auto;
+  height: 38px;
+  min-height: 38px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 5px 12px;
+  background: var(--bg4);
+}
+
+#doc-preview-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px 34px 48px;
+  font-family: var(--md-font-family);
+  font-size: var(--md-font-size);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#doc-preview-content.markdown-body {
+  white-space: normal;
+}
+
+#doc-preview-content.image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  user-select: none;
+}
+
+#doc-preview-content.unsupported {
+  color: var(--muted);
+}
+
+#doc-preview-content .doc-edit-textarea {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 0;
+  font-family: var(--md-font-family);
+  font-size: var(--md-font-size);
+  line-height: 1.7;
+  color: var(--text1);
+  background: transparent;
+  white-space: pre-wrap;
+  tab-size: 2;
+}
+
+.doc-empty-state {
+  height: 100%;
+  min-height: 240px;
+}
+
+.doc-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+#doc-refresh-btn,
+#doc-edit-btn,
+#doc-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#doc-refresh-btn .lucide,
+#doc-edit-btn .lucide,
+#doc-save-btn .lucide {
+  width: 14px;
+  height: 14px;
+}
+
+#doc-refresh-btn:hover:not(:disabled),
+#doc-edit-btn:hover:not(:disabled),
+#doc-save-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text1);
+  border-color: var(--border-strong);
+}
+
+#doc-refresh-btn:disabled,
+#doc-edit-btn:disabled,
+#doc-save-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#doc-edit-btn.editing,
+#doc-save-btn {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+#doc-save-btn:hover:not(:disabled) {
+  background: var(--success-soft);
+}
+
+/* ---------- chat column ---------- */
+
+#chat-rail-resize {
+  width: 6px;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    var(--resize-divider) 2px,
+    var(--resize-divider) 4px,
+    transparent 4px
+  );
+}
+
+#chat-rail-resize:hover,
+#chat-rail-resize.dragging {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    var(--accent) 2px,
+    var(--accent) 4px,
+    transparent 4px
+  );
+}
+
+#chat-panel {
+  flex: 0 0 auto;
+  width: 440px;
+  min-width: 320px;
+  background: var(--bg);
+  border-left: 0;
+}
+
+#chat-header {
+  min-height: 52px;
+  padding: 8px 10px 8px 12px;
+  gap: 6px;
+}
+
+#chat-meta {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#chat-meta #new-session-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+#chat-meta #new-session-btn:hover {
+  background: var(--accent-hover);
+}
+
+#chat-meta #new-session-btn .lucide {
+  width: 14px;
+  height: 14px;
+}
+
+#chat-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  color: var(--text1);
+}
+
+#chat-title.is-placeholder {
+  color: var(--muted);
+  font-weight: var(--weight-normal);
+}
+
+#chat-toolbar {
+  margin-left: 0;
+}
+
+.header-icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+#chat-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+#chat-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#chat-body.show-home #chat-content {
+  display: none;
+}
+
+/* ---------- chat home (session history view) ---------- */
+
+#chat-home {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: none;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+#chat-body.show-home #chat-home {
+  display: flex;
+}
+
+.chat-home-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 26px 20px 20px;
+}
+
+.chat-home-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 10px 0 22px;
+}
+
+.chat-home-brand {
+  width: 46px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: var(--empty-state-icon-bg);
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+
+.chat-home-brand .lucide {
+  width: 22px;
+  height: 22px;
+}
+
+.chat-home-title {
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  color: var(--text1);
+}
+
+.chat-home-copy {
+  font-size: 12.5px;
+  color: var(--muted);
+  max-width: 260px;
+  line-height: 1.55;
+}
+
+.chat-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#chat-home-new-btn {
+  height: 32px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#chat-home-new-btn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+#chat-home-new-btn .lucide {
+  width: 15px;
+  height: 15px;
+}
+
+#chat-home-resume-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#chat-home-resume-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text1);
+}
+
+.chat-home-history {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-home-history-title {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 4px 4px 8px;
+}
+
+#chat-home #session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#chat-home .session-item {
+  min-height: 44px;
+  margin-bottom: 0;
+}
+
+/* ---------- composer inside the narrower chat column ---------- */
+
+#input-area {
+  padding: 10px 12px 14px;
+}
+
+#composer {
+  width: 100%;
+  max-width: 100%;
+}
+
+#messages {
+  --conversation-content-max-width: 720px;
+}
+
+#messages .message,
+#messages .message.user {
+  max-width: min(100%, var(--conversation-content-max-width, 720px));
+}
+
+/* ---------- small screen guards ---------- */
+
+@media (max-width: 900px) {
+  #sidebar:not(.collapsed) {
+    width: min(46vw, var(--sidebar-width-default, 240px)) !important;
+    min-width: 160px;
+    flex-basis: auto;
+  }
+  #chat-panel {
+    width: min(46vw, 420px) !important;
+    min-width: 300px;
+  }
+  #doc-preview-content {
+    padding: 18px 20px 40px;
+  }
+}

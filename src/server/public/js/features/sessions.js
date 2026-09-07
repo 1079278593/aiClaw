@@ -202,6 +202,8 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     permissions.hideActive();
     saveSessionState(state.currentSessionId);
     state.currentSessionId = id;
+    // 若会话列表面板正打开着（show-home），切换到新会话后自动收起
+    actions.setChatHomeVisible?.(false);
     const inputSnapshot = state.inputEl?.value ?? "";
     const restored = restoreSessionState(id);
     if (!restored) {
@@ -289,6 +291,7 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
 
   function renderSessionList() {
     const list = document.getElementById("session-list");
+    if (!list) return;
     if (!state.sessions.length) {
       list.innerHTML = '<div class="session-list-empty">暂无对话</div>';
       return;
@@ -327,6 +330,7 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     loadSession,
     loadSessions,
     refreshSessionSummary,
+    renameSessionById,
     renderSessionList,
     selectSession,
   };

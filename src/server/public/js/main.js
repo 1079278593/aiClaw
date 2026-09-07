@@ -65,7 +65,6 @@ function closeHelpModal() {
 }
 
 function bindGlobalEvents() {
-  document.getElementById("new-session-btn").addEventListener("click", () => void actions.createSession());
   document.getElementById("help-btn").addEventListener("click", openHelpModal);
   document.getElementById("help-close-btn").addEventListener("click", closeHelpModal);
   document.getElementById("usage-close-btn").addEventListener("click", closeUsageModal);
@@ -98,6 +97,7 @@ async function boot() {
   bindGlobalEvents();
   await actions.loadClientConfig();
   await actions.loadAppState();
+  void documents.initExplorer();
   await actions.loadSessions();
   socket.connect();
 }

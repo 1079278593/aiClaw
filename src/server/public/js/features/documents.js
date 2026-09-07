@@ -1,11 +1,7 @@
 import { escHtml } from "../format.js";
 import { renderContent } from "../markdown.js";
-import { openKnowledgeModal } from "./knowledge.js";
-import { openUsageModal, setUsageDays, switchUsageTab, toggleUsageMetric } from "./usage.js";
-import { getDocRailWidth, initDocColumnResize, initDocResizeHandle, initDocVerticalResize, initSidebarResizeHandle } from "./document-layout.js";
+import { initDocExplorerResizeHandle } from "./document-layout.js";
 import { getDocSelectionSummary, getSourceLineNumberFromOffset } from "./document-selection.js";
-
-export { initSidebarResizeHandle } from "./document-layout.js";
 
 let reportError = (message) => console.error(message);
 export function configureDocuments(options) {
@@ -23,19 +19,20 @@ function getDocBrowserRoots() {
 function isTriliumDocPath(path) {
   return typeof path === "string" && (path === TRILIUM_ROOT || path.startsWith(`${TRILIUM_ROOT}/`));
 }
-const DOC_ROOT_TAB_KEY = "docRootPath";
+const DOC_ROOT_KEY = "docRootPath";
 const DOC_TABS_KEY = "docOpenTabs";
 const DOC_RECENT_KEY = "docRecentOpened";
 const MAX_RECENT_OPENED = 3;
+const EXPANDED_DIRS_KEY = "docExpandedDirs";
 
 let docRootPath = loadDocRootPath();
-let docSecondEntries = [];
-let docSecondActivePath = null;
-let docThirdEntries = [];
-let docThirdDirPath = null;
-let docThirdActivePath = null;
 
-// 打开的标签页（跨会话/刷新保留）：{ path, editMode }
+/** childrenCache: Map<directoryPath, DocBrowserEntry[]> — one level per key */
+const childrenCache = new Map();
+/** expandedDirs: Set<directoryPath> — directories whose children are shown */
+let expandedDirs = new Set(loadExpandedDirs());
+
+// 打开的标签页（跨会话/刷新保留）：{ path, editMode, sticky, label, scrollTop }
 let openTabs = loadOpenTabs();
 let activeTabPath = openTabs.length ? openTabs[0].path : null;
 
@@ -56,7 +53,7 @@ let selectedPreviewEndLine = 0;
 
 function loadDocRootPath() {
   try {
-    const stored = localStorage.getItem(DOC_ROOT_TAB_KEY);
+    const stored = localStorage.getItem(DOC_ROOT_KEY);
     if (stored === TRILIUM_ROOT || LOCAL_DOC_BROWSER_ROOTS.includes(stored)) return stored;
   } catch {
     // ignore
@@ -66,7 +63,25 @@ function loadDocRootPath() {
 
 function saveDocRootPath() {
   try {
-    localStorage.setItem(DOC_ROOT_TAB_KEY, docRootPath);
+    localStorage.setItem(DOC_ROOT_KEY, docRootPath);
+  } catch {
+    // ignore
+  }
+}
+
+function loadExpandedDirs() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(EXPANDED_DIRS_KEY) || "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((path) => typeof path === "string" && path);
+  } catch {
+    return [];
+  }
+}
+
+function saveExpandedDirs() {
+  try {
+    localStorage.setItem(EXPANDED_DIRS_KEY, JSON.stringify([...expandedDirs]));
   } catch {
     // ignore
   }
@@ -126,10 +141,6 @@ export function getRecentOpenedPaths() {
   return [...recentOpenedPaths];
 }
 
-function getActiveTabEditMode() {
-  return openTabs.find((tab) => tab.path === activeTabPath)?.editMode ?? false;
-}
-
 function loadAttachDocContext() {
   try {
     return localStorage.getItem("docAttachContext") !== "false";
@@ -138,69 +149,23 @@ function loadAttachDocContext() {
   }
 }
 
+function getActiveTabEditMode() {
+  return openTabs.find((tab) => tab.path === activeTabPath)?.editMode ?? false;
+}
+
 function getDocSelectionStatusText() {
   if (!selectedPreviewText || !selectedPreviewStartLine || !selectedPreviewEndLine) return "";
   return `已选中源文件第 ${selectedPreviewStartLine} 行到第 ${selectedPreviewEndLine} 行`;
 }
 
-function getDocEntryIcon(kind) {
-  return kind === "directory"
-    ? '<i data-lucide="folder" class="doc-entry-icon"></i>'
-    : '<i data-lucide="file" class="doc-entry-icon"></i>';
-}
-
-function buildDocColumn(title, entries, activePath, options = {}) {
-  const { showBack = false, backDisabled = true } = options;
-  return `
-    <div class="doc-column">
-      <div class="doc-column-header">
-        ${showBack ? `<button class="doc-back-btn" id="doc-back-btn" ${backDisabled ? "disabled" : ""}>返回</button>` : ""}
-        <span class="doc-column-title">${escHtml(title)}</span>
-      </div>
-      <div class="doc-column-body">
-        ${entries.length ? entries.map((entry) => `
-          <button class="doc-entry ${entry.path === activePath ? "active" : ""}" data-doc-path="${escHtml(entry.path)}" data-doc-kind="${entry.kind}" type="button">
-            <span>${getDocEntryIcon(entry.kind)}</span>
-            <span class="doc-entry-label">${escHtml(entry.name)}</span>
-          </button>
-        `).join("") : '<div class="doc-empty">暂无内容</div>'}
-      </div>
-    </div>
-  `;
-}
-
-export function getRightPanelHTML(opts = {}) {
-  const railCollapsed = localStorage.getItem("docRailCollapsed") === "true";
-  const width = railCollapsed ? 44 : getDocRailWidth();
-  const showToggle = opts.showToggle !== false;
-  const toggleHTML = showToggle ? `<button id="doc-rail-toggle" class="icon-button" title="${railCollapsed ? "展开文件浏览器" : "收起文件浏览器"}" aria-label="${railCollapsed ? "展开文件浏览器" : "收起文件浏览器"}" aria-expanded="${!railCollapsed}"><i data-lucide="${railCollapsed ? "panel-right-open" : "panel-right-close"}"></i></button>` : "";
-  return `
-    <div id="doc-rail-resize" title="拖拽调整右栏宽度"></div>
-    <aside id="action-rail" class="${railCollapsed ? "collapsed" : ""}" style="width:${width}px">
-      ${toggleHTML}
-      <button id="doc-rail-edit-btn" class="icon-button" type="button" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button>
-      <div id="doc-browser">
-        <div id="doc-root-tabs"></div>
-        <div id="doc-columns"></div>
-        <div id="doc-vertical-resizer"></div>
-        <section id="doc-preview-panel">
-          <div id="doc-tabs"></div>
-          <div id="doc-preview-toolbar">
-            <div id="doc-selection-status">
-              <div class="doc-selection-lines"></div>
-              <div class="doc-selection-summary"></div>
-            </div>
-            <div class="doc-toolbar-actions">
-              <button id="doc-refresh-btn" class="icon-button" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i></button>
-              <button id="doc-edit-btn" class="icon-button" type="button" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button>
-            </div>
-          </div>
-          <div id="doc-preview-content" class="${docPreviewSupported ? "" : "unsupported"}"></div>
-        </section>
-      </div>
-    </aside>
-  `;
-}
+/* ------------------------------------------------------------------ *
+ *  Generic expandable directory tree (left column)
+ *
+ *  Each directory row toggles its children; child directories are
+ *  indented by nesting depth. Children for a directory are fetched
+ *  lazily from /api/documents/tree and cached. The same logic is used
+ *  for knowledge_base / inputs / trilium roots.
+ * ------------------------------------------------------------------ */
 
 async function fetchDocTree(path) {
   const res = await fetch(`/api/documents/tree?path=${encodeURIComponent(path)}`);
@@ -220,6 +185,166 @@ async function fetchDocContent(path) {
   }
   return data;
 }
+
+/** Entry depth for indentation. Direct children of a root sit at level 0. */
+async function ensureChildren(path) {
+  if (childrenCache.has(path)) return childrenCache.get(path);
+  const entries = await fetchDocTree(path);
+  childrenCache.set(path, entries);
+  return entries;
+}
+
+async function expandDir(path) {
+  try {
+    await ensureChildren(path);
+  } catch (error) {
+    reportError((error && error.message) ? error.message : "读取目录失败");
+    return false;
+  }
+  expandedDirs.add(path);
+  saveExpandedDirs();
+  renderFileTree();
+  return true;
+}
+
+function collapseDir(path) {
+  expandedDirs.delete(path);
+  saveExpandedDirs();
+  renderFileTree();
+}
+
+async function toggleDir(path) {
+  if (expandedDirs.has(path)) collapseDir(path);
+  else await expandDir(path);
+}
+
+/** Collect the currently visible rows (depth-first) under the active root. */
+function collectVisibleRows() {
+  const rows = [];
+  const walk = (entries, depth) => {
+    for (const entry of entries) {
+      rows.push({ entry, depth });
+      if (entry.kind === "directory" && expandedDirs.has(entry.path)) {
+        const children = childrenCache.get(entry.path);
+        if (children) walk(children, depth + 1);
+      }
+    }
+  };
+  const entries = childrenCache.get(docRootPath);
+  if (entries) walk(entries, 0);
+  return rows;
+}
+
+async function openFileFromTree(path) {
+  const ok = await openDocPreview(path);
+  if (ok) renderFileTree();
+  return ok;
+}
+
+function renderFileTree() {
+  const tree = document.getElementById("file-tree");
+  if (!tree) return;
+  const rows = collectVisibleRows();
+  if (!rows.length) {
+    tree.innerHTML = '<div class="file-tree-empty">此目录为空</div>';
+    return;
+  }
+  tree.innerHTML = rows.map(({ entry, depth }) => {
+    const isDir = entry.kind === "directory";
+    const expanded = isDir && expandedDirs.has(entry.path);
+    const active = !isDir && entry.path === activeTabPath;
+    const chevron = isDir
+      ? `<span class="tree-chevron ${expanded ? "open" : ""}"><i data-lucide="chevron-right"></i></span>`
+      : '<span class="tree-chevron tree-chevron-placeholder"></span>';
+    const icon = isDir ? "folder" : (expanded ? "" : "file");
+    return `
+      <div class="file-tree-row ${active ? "active" : ""}" data-path="${escHtml(entry.path)}" data-kind="${entry.kind}"
+           style="padding-left:${10 + depth * 15}px" role="treeitem" ${isDir ? `aria-expanded="${String(expanded)}"` : ""}>
+        ${chevron}
+        <span class="tree-icon"><i data-lucide="${isDir ? (expanded ? "folder-open" : "folder") : icon}"></i></span>
+        <span class="tree-label" title="${escHtml(entry.path)}">${escHtml(entry.name)}</span>
+      </div>`;
+  }).join("");
+  window.lucide?.createIcons();
+
+  tree.querySelectorAll(".file-tree-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const path = row.dataset.path;
+      const kind = row.dataset.kind;
+      if (kind === "directory") void toggleDir(path);
+      else void openFileFromTree(path);
+    });
+  });
+}
+
+function renderRootTabs() {
+  const container = document.getElementById("file-root-tabs");
+  if (!container) return;
+  const roots = getDocBrowserRoots();
+  container.innerHTML = `
+    ${roots.map((root) => `
+      <button class="file-root-tab ${root === docRootPath ? "active" : ""}" data-root="${escHtml(root)}" type="button"
+              role="tab" aria-selected="${root === docRootPath ? "true" : "false"}" title="${root}">
+        <i data-lucide="${root === docRootPath ? "folder-open" : "folder"}" class="file-root-tab-icon"></i>
+        <span class="file-root-tab-label">${escHtml(root === TRILIUM_ROOT ? "trilium（只读）" : root)}</span>
+      </button>`).join("")}
+    <button id="file-refresh-btn" class="icon-button file-refresh-btn" type="button" title="刷新目录" aria-label="刷新目录">
+      <i data-lucide="refresh-cw"></i>
+    </button>`;
+  window.lucide?.createIcons();
+
+  container.querySelectorAll(".file-root-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const root = button.dataset.root;
+      if (!root || root === docRootPath) return;
+      setDocRoot(root);
+    });
+  });
+  container.querySelector("#file-refresh-btn")?.addEventListener("click", () => void refreshDocBrowser());
+}
+
+async function setDocRoot(root) {
+  docRootPath = root;
+  saveDocRootPath();
+  try {
+    await ensureChildren(root);
+  } catch (error) {
+    reportError((error && error.message) ? error.message : "读取目录失败");
+  }
+  renderRootTabs();
+  renderFileTree();
+}
+
+/** Bind the left explorer once (elements are static in index.html). */
+export async function initExplorer() {
+  const explorer = document.getElementById("file-explorer");
+  if (!explorer || explorer.dataset.initialized) return;
+  explorer.dataset.initialized = "true";
+
+  try {
+    const res = await fetch("/api/config");
+    const data = await res.json();
+    triliumEnabled = data?.triliumEnabled === true;
+  } catch {
+    triliumEnabled = false;
+  }
+  if (!getDocBrowserRoots().includes(docRootPath)) {
+    docRootPath = LOCAL_DOC_BROWSER_ROOTS[0];
+    saveDocRootPath();
+  }
+  renderRootTabs();
+  try {
+    await ensureChildren(docRootPath);
+  } catch {
+    childrenCache.set(docRootPath, []);
+  }
+  renderFileTree();
+  initDocExplorerResizeHandle();
+}
+
+/* ------------------------------------------------------------------ *
+ *  Middle document reader (tabs + preview + edit)
+ * ------------------------------------------------------------------ */
 
 export function saveDocPreviewScrollPosition() {
   saveActiveTabScrollPosition();
@@ -252,9 +377,17 @@ export function clearPreviewSelection() {
   updateDocSelectionStatus();
 }
 
+function isEditableText() {
+  return Boolean(
+    activeTabPath
+    && openTabs.find((tab) => tab.path === activeTabPath)
+    && docPreviewKind === "text"
+    && !isTriliumDocPath(activeTabPath),
+  );
+}
+
 async function saveCurrentTabEdit() {
-  const tab = openTabs.find((item) => item.path === activeTabPath);
-  if (!tab || !tab.editMode || docPreviewKind !== "text" || isTriliumDocPath(tab.path)) return true;
+  if (!getActiveTabEditMode() || !isEditableText()) return true;
   const container = document.getElementById("doc-preview-content");
   const textarea = container?.querySelector(".doc-edit-textarea");
   if (!(textarea instanceof HTMLTextAreaElement)) return true;
@@ -274,9 +407,24 @@ async function saveCurrentTabEdit() {
   }
 }
 
+export async function saveActiveDoc({ stayInEdit = false } = {}) {
+  const ok = await saveCurrentTabEdit();
+  if (!ok) return false;
+  if (!stayInEdit) {
+    const tab = openTabs.find((item) => item.path === activeTabPath);
+    if (tab) tab.editMode = false;
+    saveOpenTabs();
+    clearPreviewSelection();
+    updateDocPreviewPanel();
+  }
+  renderDocTabs();
+  updateDocSelectionStatus();
+  return true;
+}
+
 async function toggleDocEdit() {
+  if (!isEditableText()) return;
   const tab = openTabs.find((item) => item.path === activeTabPath);
-  if (!tab || docPreviewKind !== "text" || isTriliumDocPath(tab.path)) return;
   const container = document.getElementById("doc-preview-content");
   let scrollRatio = 0;
   if (tab.editMode) {
@@ -311,6 +459,7 @@ async function toggleDocEdit() {
       const maxScroll = textarea.scrollHeight - textarea.clientHeight;
       textarea.scrollTop = Math.min(scrollRatio * maxScroll, maxScroll);
       tab.scrollTop = textarea.scrollTop;
+      textarea.focus();
     }
   }
   renderDocTabs();
@@ -320,20 +469,40 @@ async function toggleDocEdit() {
 function updateDocSelectionStatus() {
   const linesEl = document.querySelector("#doc-selection-status .doc-selection-lines");
   const summaryEl = document.querySelector("#doc-selection-status .doc-selection-summary");
-  if (linesEl) linesEl.textContent = getDocSelectionStatusText();
+  if (linesEl && !linesEl.dataset.flashing) linesEl.textContent = getDocSelectionStatusText();
   if (summaryEl) summaryEl.textContent = selectedPreviewSummary ? `"${selectedPreviewSummary}"` : "";
-  const editIcon = getActiveTabEditMode() ? "log-out" : "pencil";
-  const editDisabled = !activeTabPath || docPreviewKind !== "text" || isTriliumDocPath(activeTabPath);
-  // 同步预览工具栏和收起态竖条上的两个编辑按钮
-  for (const editBtn of [document.getElementById("doc-edit-btn"), document.getElementById("doc-rail-edit-btn")]) {
-    if (!editBtn) continue;
+  const editMode = getActiveTabEditMode();
+  const editIcon = editMode ? "log-out" : "pencil";
+  const editDisabled = !isEditableText();
+  const editBtn = document.getElementById("doc-edit-btn");
+  if (editBtn) {
     if (editBtn.dataset.icon !== editIcon) {
       editBtn.dataset.icon = editIcon;
       editBtn.innerHTML = `<i data-lucide="${editIcon}"></i>`;
       window.lucide?.createIcons();
     }
     editBtn.disabled = editDisabled;
+    editBtn.title = editMode ? "保存并退出编辑" : "编辑此文档";
+    editBtn.setAttribute("aria-label", editBtn.title);
   }
+  const saveBtn = document.getElementById("doc-save-btn");
+  if (saveBtn) {
+    saveBtn.hidden = !(editMode && isEditableText());
+    saveBtn.disabled = !(editMode && isEditableText());
+    saveBtn.title = "保存修改（Ctrl/Cmd+S）";
+  }
+}
+
+function flashDocStatus(message) {
+  const linesEl = document.querySelector("#doc-selection-status .doc-selection-lines");
+  if (!linesEl) return;
+  linesEl.dataset.flashing = "true";
+  linesEl.textContent = message;
+  window.clearTimeout(linesEl._flashTimer);
+  linesEl._flashTimer = window.setTimeout(() => {
+    delete linesEl.dataset.flashing;
+    updateDocSelectionStatus();
+  }, 1800);
 }
 
 export function getSelectedPreviewPayload() {
@@ -400,7 +569,8 @@ function updateDocPreviewPanel() {
   if (!activeTabPath) {
     content.classList.remove("markdown-body");
     content.classList.remove("image-preview");
-    content.textContent = "请选择一个文件进行预览";
+    content.innerHTML = "";
+    content.appendChild(buildDocEmptyState());
     return;
   }
   if (!docPreviewSupported) {
@@ -429,6 +599,16 @@ function updateDocPreviewPanel() {
   const basePath = activeTabPath ? activeTabPath.replace(/[^/\\]*$/, "") : "";
   renderContent(content, docPreviewContent, basePath);
   restorePreviewScroll(content);
+}
+
+function buildDocEmptyState() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "empty-state doc-empty-state";
+  wrapper.innerHTML = `
+    <div class="empty-state-icon"><i data-lucide="file-text"></i></div>
+    <p class="empty-state-title">文档阅读</p>
+    <p class="empty-state-copy">在左侧文件栏选择一个文件，这里会展示其内容</p>`;
+  return wrapper;
 }
 
 async function loadActiveTabContent() {
@@ -475,7 +655,7 @@ async function openDocPreview(path) {
   if (openTabs.some((tab) => tab.path === path)) {
     // 已打开：直接激活（保留其固定/临时状态）
     await activateTab(path);
-    return;
+    return true;
   }
   // 存在临时标签（斜体、未固定）时替换它，否则新建临时标签
   const tempIndex = openTabs.findIndex((tab) => !tab.sticky);
@@ -483,7 +663,7 @@ async function openDocPreview(path) {
   if (tempIndex !== -1) {
     if (openTabs[tempIndex].path === activeTabPath) {
       const ok = await saveCurrentTabEdit();
-      if (!ok) return;
+      if (!ok) return false;
     }
     openTabs[tempIndex] = { path, editMode: false, sticky: false };
   } else {
@@ -501,11 +681,13 @@ async function openDocPreview(path) {
       saveOpenTabs();
       renderDocTabs();
       await loadActiveTabContent();
-    } else {
-      // 打开失败：回滚刚创建的标签
-      await closeTab(path, { saveEdit: false });
+      return false;
     }
+    // 打开失败：回滚刚创建的标签
+    await closeTab(path, { saveEdit: false });
+    return false;
   }
+  return true;
 }
 
 async function activateTab(path) {
@@ -548,6 +730,7 @@ async function closeTab(path, { saveEdit = true } = {}) {
     saveOpenTabs();
   }
   renderDocTabs();
+  renderFileTree();
 }
 
 function renderDocTabs() {
@@ -600,129 +783,37 @@ function renderDocTabs() {
   }
 }
 
-function renderDocColumns() {
-  const container = document.getElementById("doc-columns");
-  if (!container) return;
-
-  const rootTabs = document.getElementById("doc-root-tabs");
-  if (rootTabs) {
-    rootTabs.innerHTML = getDocBrowserRoots().map((root) => `
-      <button class="doc-root-tab ${root === docRootPath ? "active" : ""}" data-doc-root="${escHtml(root)}" type="button" role="tab" aria-selected="${root === docRootPath ? "true" : "false"}">
-        <i data-lucide="folder" class="doc-root-tab-icon"></i>
-        <span class="doc-root-tab-label">${escHtml(root === TRILIUM_ROOT ? "trilium（只读）" : root)}</span>
-      </button>
-    `).join("");
-    window.lucide?.createIcons();
-    rootTabs.querySelectorAll(".doc-root-tab").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const root = button.dataset.docRoot;
-        if (!root || root === docRootPath) return;
-        docRootPath = root;
-        saveDocRootPath();
-        docSecondActivePath = null;
-        docThirdDirPath = null;
-        docThirdEntries = [];
-        docThirdActivePath = null;
-        docSecondEntries = await fetchDocTree(root);
-        renderDocColumns();
-      });
-    });
-  }
-
-  const scrollTops = Array.from(container.querySelectorAll(".doc-column-body")).map((el) => el.scrollTop);
-  container.innerHTML = [
-    buildDocColumn(docRootPath || "", docSecondEntries, docSecondActivePath),
-    '<div class="doc-column-resizer" data-column-resizer="0" title="拖拽调整文件树列宽"></div>',
-    buildDocColumn(docThirdDirPath ? docThirdDirPath.split("/").pop() || "" : "", docThirdEntries, docThirdActivePath, {
-      showBack: true,
-      backDisabled: !docThirdDirPath,
-    }),
-  ].join("");
-  window.lucide?.createIcons();
-  initDocColumnResize();
-  // Restore scroll after all DOM modifications (createIcons, column resize)
-  // so that layout shifts from icon replacement or width changes don't
-  // invalidate the scroll position.
-  container.querySelectorAll(".doc-column-body").forEach((el, index) => {
-    el.scrollTop = scrollTops[index] || 0;
-  });
-
-  container.querySelectorAll(".doc-entry").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const path = button.dataset.docPath;
-      const kind = button.dataset.docKind;
-      if (!path) return;
-
-      const docColumns = container.querySelectorAll(".doc-column");
-      const inFirstColumn = button.closest(".doc-column") === docColumns[0];
-      if (inFirstColumn) {
-        docSecondActivePath = path;
-        if (kind === "directory") {
-          docThirdDirPath = path;
-          docThirdActivePath = null;
-          docThirdEntries = await fetchDocTree(path);
-        } else {
-          docThirdActivePath = path;
-          docThirdDirPath = null;
-          docThirdEntries = [];
-          await openDocPreview(path);
-        }
-        renderDocColumns();
-        return;
-      }
-
-      if (kind === "directory") {
-        docThirdDirPath = path;
-        docThirdActivePath = null;
-        docThirdEntries = await fetchDocTree(path);
-        renderDocColumns();
-        return;
-      }
-
-      docThirdActivePath = path;
-      await openDocPreview(path);
-      renderDocColumns();
-    });
-  });
-
-  document.getElementById("doc-back-btn")?.addEventListener("click", async () => {
-    if (!docThirdDirPath) return;
-    const parts = docThirdDirPath.split("/");
-    parts.pop();
-    const parentPath = parts.join("/");
-    if (!parentPath || parentPath === docRootPath) {
-      // 回到第一层：清空第二列
-      docThirdDirPath = null;
-      docThirdEntries = [];
-      docThirdActivePath = null;
-      docSecondActivePath = null;
-    } else {
-      docThirdDirPath = parentPath;
-      docThirdActivePath = null;
-      docThirdEntries = await fetchDocTree(parentPath);
-    }
-    renderDocColumns();
-  });
-}
-
+/**
+ * 刷新文档浏览（模型写/删文件后、或用户点击刷新按钮时调用）：
+ * 重新拉取当前根目录与已展开目录的条目，并重新加载活动标签内容。
+ */
 export async function refreshDocBrowser() {
   try {
     clearPreviewSelection();
     saveActiveTabScrollPosition();
     if (docRootPath) {
-      docSecondEntries = await fetchDocTree(docRootPath);
-      if (docSecondActivePath && !docSecondEntries.some((entry) => entry.path === docSecondActivePath)) {
-        docSecondActivePath = null;
-        docThirdDirPath = null;
-        docThirdEntries = [];
-      } else if (docThirdDirPath) {
-        try {
-          docThirdEntries = await fetchDocTree(docThirdDirPath);
-        } catch {
-          docThirdDirPath = null;
-          docThirdEntries = [];
-        }
+      try {
+        childrenCache.set(docRootPath, await fetchDocTree(docRootPath));
+      } catch {
+        childrenCache.set(docRootPath, []);
       }
+      // 只刷新当前根目录下已展开的目录
+      const prefix = `${docRootPath}/`;
+      const stale = [];
+      const expandedUnderRoot = [...expandedDirs].filter((dir) => dir.startsWith(prefix));
+      await Promise.all(expandedUnderRoot.map(async (dir) => {
+        try {
+          childrenCache.set(dir, await fetchDocTree(dir));
+        } catch {
+          stale.push(dir);
+        }
+      }));
+      for (const dir of stale) {
+        expandedDirs.delete(dir);
+        childrenCache.delete(dir);
+      }
+      saveExpandedDirs();
+      renderFileTree();
     }
 
     if (activeTabPath) {
@@ -735,97 +826,48 @@ export async function refreshDocBrowser() {
       updateDocPreviewPanel();
       updateDocSelectionStatus();
     }
-
-    renderDocColumns();
     renderDocTabs();
+    renderFileTree();
   } catch (error) {
     reportError((error && error.message) ? error.message : "刷新文档结构失败");
   }
 }
 
-function initDocRailToggle() {
-  const rail = document.getElementById("action-rail");
-  const btn = document.getElementById("doc-rail-toggle");
-  if (!rail || !btn || btn.dataset.initialized) return;
-  btn.dataset.initialized = "true";
+/**
+ * Bind the middle document reader. Called after every #main rebuild.
+ */
+export async function initDocView() {
+  const content = document.getElementById("doc-preview-content");
+  if (!content) return;
 
-  btn.addEventListener("click", () => {
-    const isCollapsed = !rail.classList.contains("collapsed");
-    rail.classList.toggle("collapsed", isCollapsed);
-    localStorage.setItem("docRailCollapsed", String(isCollapsed));
-
-    // Update icon
-    const newIcon = isCollapsed ? "panel-right-open" : "panel-right-close";
-    btn.innerHTML = `<i data-lucide="${newIcon}"></i>`;
-    btn.title = isCollapsed ? "展开文件浏览器" : "收起文件浏览器";
-    btn.setAttribute("aria-label", btn.title);
-    btn.setAttribute("aria-expanded", String(!isCollapsed));
-
-    // When collapsing, save current width; when expanding, restore
-    if (!isCollapsed) {
-      const savedWidth = getDocRailWidth();
-      rail.style.width = `${savedWidth}px`;
-    }
-
-    window.lucide?.createIcons();
+  document.getElementById("doc-refresh-btn")?.addEventListener("click", () => void refreshDocBrowser());
+  document.getElementById("doc-edit-btn")?.addEventListener("click", () => void toggleDocEdit());
+  document.getElementById("doc-save-btn")?.addEventListener("click", async () => {
+    if (await saveActiveDoc({ stayInEdit: true })) flashDocStatus("已保存");
   });
-}
-
-export function initRightPanel() {
-  initDocVerticalResize();
-  initDocRailToggle();
-  document.getElementById("usage-btn")?.addEventListener("click", openUsageModal);
-  document.querySelectorAll(".usage-tab").forEach((el) => {
-    el.addEventListener("click", () => switchUsageTab(el.dataset.tab));
-  });
-  document.querySelectorAll(".usage-range-btn").forEach((el) => {
-    el.addEventListener("click", () => {
-      const days = parseInt(el.dataset.days, 10);
-      document.querySelectorAll(".usage-range-btn").forEach((b) => b.classList.toggle("active", b === el));
-      setUsageDays(days);
-    });
-  });
-  document.querySelectorAll(".usage-metric-toggle").forEach((el) => {
-    el.addEventListener("click", () => toggleUsageMetric(el.dataset.metric));
-  });
-  document.getElementById("knowledge-btn")?.addEventListener("click", openKnowledgeModal);
-  document.getElementById("doc-refresh-btn")?.addEventListener("click", refreshDocBrowser);
-  document.getElementById("doc-edit-btn")?.addEventListener("click", toggleDocEdit);
-  document.getElementById("doc-rail-edit-btn")?.addEventListener("click", toggleDocEdit);
-  document.getElementById("doc-preview-content")?.addEventListener("click", () => {
+  content.addEventListener("click", () => {
     const selection = window.getSelection();
     if (!selection || selection.toString().trim()) return;
     if (!selectedPreviewText) return;
     clearPreviewSelection();
   });
-  initDocResizeHandle();
-  renderDocColumns();
+
+  // Ctrl/Cmd+S 在编辑态保存并停留在编辑态
+  content.addEventListener("keydown", async (event) => {
+    if (!(event.metaKey || event.ctrlKey) || event.key !== "s") return;
+    if (!getActiveTabEditMode() || !isEditableText()) return;
+    event.preventDefault();
+    if (await saveActiveDoc({ stayInEdit: true })) flashDocStatus("已保存");
+  });
+
   renderDocTabs();
-  // 刷新/重建后重新加载当前根目录的文件树（初始状态 docSecondEntries 为空）
-  void (async () => {
-    try {
-      const res = await fetch("/api/config");
-      const data = await res.json();
-      triliumEnabled = data?.triliumEnabled === true;
-    } catch {
-      triliumEnabled = false;
-    }
-    if (!getDocBrowserRoots().includes(docRootPath)) {
-      docRootPath = LOCAL_DOC_BROWSER_ROOTS[0];
-      saveDocRootPath();
-    }
-    try {
-      docSecondEntries = await fetchDocTree(docRootPath);
-    } catch {
-      docSecondEntries = [];
-    }
-    renderDocColumns();
-  })();
   if (activeTabPath) {
-    // 页面刷新后恢复活动标签的内容
-    void loadActiveTabContent();
+    // 页面刷新/面板重建后恢复活动标签的内容
+    await loadActiveTabContent();
   } else {
     updateDocPreviewPanel();
     updateDocSelectionStatus();
   }
+  updateDocSelectionStatus();
+  renderFileTree();
 }

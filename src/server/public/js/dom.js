@@ -1,51 +1,75 @@
 import { escHtml } from "./format.js";
-import { clearChatElements } from "./state.js";
 import { initGitSync } from "./features/git-sync.js";
+import { initChatRailResizeHandle, applyExplorerWidth, getChatPanelWidth } from "./features/document-layout.js";
+import { openKnowledgeModal } from "./features/knowledge.js";
+import { openUsageModal, switchUsageTab, setUsageDays, toggleUsageMetric } from "./features/usage.js";
 import { requestJson } from "./api.js";
-
-const WORKSPACE_MODE_STORAGE_KEY = "hyxclaw-workspace-mode";
 
 export function createChatView({ state, documents, pickers, permissions, actions }) {
   let toolbarMenuOutsideClickBound = false;
-  let workspaceResizeBound = false;
+  let staticModalBindingsBound = false;
 
-  function renderChatArea() {
-    const main = document.getElementById("main");
-    // Save document preview scroll position before DOM rebuild so it can be
-    // restored after the new preview panel is rendered.
-    documents.saveDocPreviewScrollPosition();
+  /* ------------------------------------------------------------------ *
+   *  Main shell: [document reader] [chat]
+   *  The left file explorer (#sidebar) is static in index.html.
+   * ------------------------------------------------------------------ */
+
+  function buildChatPanelMarkup() {
     const title = state.sessions.find((session) => session.id === state.currentSessionId)?.title || "";
-    if (!state.currentSessionId) {
-      main.innerHTML = `<div id="main-shell" data-workspace-mode="${getWorkspaceMode()}"><div id="chat-panel"><div id="chat-content"><div id="no-session"><div class="empty-state"><div class="empty-state-icon"><i data-lucide="message-circle"></i></div><p class="empty-state-title">欢迎回来</p><p class="empty-state-copy">选择一个会话或新建一个开始对话</p></div></div></div><section id="document-stage" aria-label="文档预览"></section></div>${documents.getRightPanelHTML({ showToggle: false })}</div>`;
-      clearChatElements(state);
-      documents.initRightPanel();
-      initWorkspaceMode();
-      window.lucide?.createIcons();
-      return;
-    }
-
-    const railCollapsed = localStorage.getItem("docRailCollapsed") === "true";
-    main.innerHTML = `
-      <div id="main-shell" data-workspace-mode="${getWorkspaceMode()}">
-        <div id="chat-panel">
-          <div id="chat-header">
-            <div id="chat-meta">
-              <div id="chat-title">${escHtml(title)}</div>
-            </div>
-            <div id="workspace-mode-control" role="group" aria-label="工作区模式">
-              <button class="workspace-mode-btn" type="button" data-workspace-mode="chat" title="聊天模式" aria-label="聊天模式" aria-pressed="false">聊天</button>
-              <button class="workspace-mode-btn" type="button" data-workspace-mode="document" title="阅读模式" aria-label="阅读模式" aria-pressed="false">阅读</button>
-            </div>
-            <div id="chat-toolbar">
-              <div id="chat-actions">
-                <button class="header-icon-btn" id="usage-btn" title="Token 统计" aria-label="Token 统计"><i data-lucide="bar-chart-3"></i></button>
-                <button class="header-icon-btn" id="knowledge-btn" title="知识库" aria-label="知识库"><i data-lucide="book-open"></i></button>
-                ${state.gitSyncEnabled ? '<button class="header-icon-btn" id="git-sync-btn" title="同步" aria-label="同步"><i data-lucide="git-compare-arrows"></i></button>' : ""}
-                <button class="header-icon-btn" id="doc-rail-toggle" title="${railCollapsed ? "展开文件浏览器" : "收起文件浏览器"}" aria-label="${railCollapsed ? "展开文件浏览器" : "收起文件浏览器"}" aria-expanded="${!railCollapsed}"><i data-lucide="${railCollapsed ? "panel-right-open" : "panel-right-close"}"></i></button>
+    const hasSession = Boolean(state.currentSessionId);
+    return `
+    <section id="document-panel" aria-label="文档阅读区">
+      <div id="doc-view-tabs"><div id="doc-tabs"></div></div>
+      <div id="doc-preview-toolbar">
+        <div id="doc-selection-status">
+          <div class="doc-selection-lines"></div>
+          <div class="doc-selection-summary"></div>
+        </div>
+        <div class="doc-toolbar-actions">
+          <button id="doc-save-btn" class="doc-tool-btn" type="button" title="保存修改（Ctrl/Cmd+S）" aria-label="保存修改" hidden><i data-lucide="check"></i><span>保存</span></button>
+          <button id="doc-edit-btn" class="doc-tool-btn" type="button" title="编辑此文档" aria-label="编辑此文档"><i data-lucide="pencil"></i><span>编辑</span></button>
+          <button id="doc-refresh-btn" class="doc-tool-btn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+        </div>
+      </div>
+      <div id="doc-preview-content"></div>
+    </section>
+    <div id="chat-rail-resize" title="拖拽调整聊天宽度"></div>
+    <aside id="chat-panel" aria-label="AI 聊天" style="width:${getChatPanelWidth()}px">
+      <div id="chat-header">
+        <div id="chat-meta">
+          <button id="new-session-btn" type="button" title="新建对话" aria-label="新建对话">
+            <i data-lucide="plus"></i><span>新对话</span>
+          </button>
+          <div id="chat-title" class="${hasSession ? "" : "is-placeholder"}" title="${escHtml(title || "尚未开始对话")}">${escHtml(title || "聊天")}</div>
+        </div>
+        <div id="chat-toolbar">
+          <div id="chat-actions">
+            <button class="header-icon-btn" id="chat-home-btn" title="会话列表" aria-label="会话列表" aria-expanded="false"><i data-lucide="history"></i></button>
+            <button class="header-icon-btn" id="usage-btn" title="Token 统计" aria-label="Token 统计"><i data-lucide="bar-chart-3"></i></button>
+            <button class="header-icon-btn" id="knowledge-btn" title="知识库" aria-label="知识库"><i data-lucide="book-open"></i></button>
+            ${state.gitSyncEnabled ? '<button class="header-icon-btn" id="git-sync-btn" title="同步" aria-label="同步"><i data-lucide="git-compare-arrows"></i></button>' : ""}
+          </div>
+        </div>
+      </div>
+      <div id="chat-body" class="${hasSession ? "" : "show-home"}">
+        <div id="chat-home">
+          <div class="chat-home-scroll">
+            <div class="chat-home-hero">
+              <div class="chat-home-brand"><i data-lucide="message-circle"></i></div>
+              <div class="chat-home-title">与 AI 对话</div>
+              <div class="chat-home-copy">把左侧文档当作上下文，向 AI 提问、总结或写作</div>
+              <div class="chat-home-actions">
+                <button id="chat-home-new-btn" type="button" title="新建对话"><i data-lucide="plus"></i><span>新建对话</span></button>
+                <button id="chat-home-resume-btn" type="button" title="返回当前对话" hidden><span>返回当前对话</span></button>
               </div>
             </div>
+            <div class="chat-home-history">
+              <div class="chat-home-history-title">历史会话</div>
+              <div id="session-list"><div class="session-list-empty">暂无对话</div></div>
+            </div>
           </div>
-          <div id="chat-content">
+        </div>
+        <div id="chat-content">
           <div id="messages"><div id="empty-state" class="empty-state"><div class="empty-state-icon"><i data-lucide="message-circle"></i></div><p class="empty-state-title">发送消息开始对话</p></div></div>
           <div id="input-area">
             <div id="composer">
@@ -85,93 +109,36 @@ export function createChatView({ state, documents, pickers, permissions, actions
               </div>
             </div>
           </div>
-          </div>
-          <section id="document-stage" aria-label="文档预览"></section>
         </div>
-        ${documents.getRightPanelHTML({ showToggle: false })}
-      </div>`;
+      </div>
+    </aside>`;
+  }
+
+  function renderChatArea() {
+    const main = document.getElementById("main");
+    // Save document preview scroll position before DOM rebuild so it can be
+    // restored after the new preview panel is rendered.
+    documents.saveDocPreviewScrollPosition();
+    applyExplorerWidth();
+    main.innerHTML = `<div id="main-shell">${buildChatPanelMarkup()}</div>`;
 
     captureElements();
+    bindChatHeaderEvents();
+    bindChatHomeEvents();
     actions.bindScrollListener();
     bindComposerEvents();
-    documents.initRightPanel();
+    documents.initDocView();
     initGitSync();
-    initWorkspaceMode();
     syncModelControls();
     pickers.bindComposer();
     permissions.init();
+    actions.renderSessionList?.();
     actions.syncCompactButton();
     actions.updateTokenDisplay(state.latestUsage);
 
     // Trigger lucide icon rendering for dynamically added elements
     window.lucide?.createIcons();
-  }
-
-  function getWorkspaceMode() {
-    const preferred = localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY);
-    return preferred === "document" ? "document" : "chat";
-  }
-
-  function initWorkspaceMode() {
-    document.querySelectorAll(".workspace-mode-btn").forEach((button) => {
-      if (button.dataset.initialized) return;
-      button.dataset.initialized = "true";
-      button.addEventListener("click", () => {
-        const mode = button.dataset.workspaceMode;
-        if (mode !== "chat" && mode !== "document") return;
-        localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, mode);
-        applyWorkspaceMode(getWorkspaceMode());
-      });
-    });
-
-    if (!workspaceResizeBound) {
-      workspaceResizeBound = true;
-      window.addEventListener("resize", () => applyWorkspaceMode(getWorkspaceMode()));
-    }
-
-    applyWorkspaceMode(getWorkspaceMode());
-  }
-
-  function applyWorkspaceMode(mode) {
-    const shell = document.getElementById("main-shell");
-    const chatPanel = document.getElementById("chat-panel");
-    const chatHeader = document.getElementById("chat-header");
-    const chatContent = document.getElementById("chat-content");
-    const documentStage = document.getElementById("document-stage");
-    const previewPanel = document.getElementById("doc-preview-panel");
-    const previewToolbar = document.getElementById("doc-preview-toolbar");
-    const previewContent = document.getElementById("doc-preview-content");
-    if (!shell || !chatPanel || !chatContent || !documentStage || !previewPanel || !previewToolbar || !previewContent) return;
-
-    const modeChanged = shell.dataset.workspaceMode !== mode;
-    if (mode === "document") {
-      documentStage.appendChild(previewContent);
-      previewPanel.appendChild(chatContent);
-    } else {
-      if (chatHeader) chatHeader.after(chatContent);
-      else chatPanel.insertBefore(chatContent, documentStage);
-      previewToolbar.after(previewContent);
-    }
-
-    shell.dataset.workspaceMode = mode;
-    if (modeChanged) {
-      requestAnimationFrame(() => {
-        if (shell.dataset.workspaceMode !== mode || !state.messagesEl) return;
-        state.userScrolledUp = false;
-        state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
-      });
-    }
-    syncWorkspaceModeControls(mode);
-    window.lucide?.createIcons();
-  }
-
-  function syncWorkspaceModeControls(mode) {
-    document.querySelectorAll(".workspace-mode-btn").forEach((button) => {
-      const active = button.dataset.workspaceMode === mode;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-      button.title = button.dataset.workspaceMode === "document" ? "阅读模式" : "聊天模式";
-    });
+    initChatRailResizeHandle();
   }
 
   function captureElements() {
@@ -183,6 +150,72 @@ export function createChatView({ state, documents, pickers, permissions, actions
     state.modelSelectEl = document.getElementById("model-select");
     state.thinkingEffortSelectEl = document.getElementById("thinking-effort-select");
     state.pendingImagesEl = document.getElementById("pending-images");
+  }
+
+  /* ---- Chat header + chat home (session history overlay) ---- */
+
+  function setChatHomeVisible(visible) {
+    const body = document.getElementById("chat-body");
+    if (!body) return;
+    body.classList.toggle("show-home", visible);
+    const btn = document.getElementById("chat-home-btn");
+    if (btn) {
+      btn.title = visible ? "返回当前对话" : "会话列表";
+      btn.setAttribute("aria-label", btn.title);
+      btn.setAttribute("aria-expanded", String(visible));
+    }
+    const resume = document.getElementById("chat-home-resume-btn");
+    if (resume) resume.hidden = !state.currentSessionId || !visible;
+    const input = state.inputEl;
+    if (input) input.disabled = Boolean(visible) && !state.currentSessionId;
+    actions.updateSendAvailability?.();
+  }
+
+  function toggleChatHome() {
+    const body = document.getElementById("chat-body");
+    if (!body) return;
+    setChatHomeVisible(!body.classList.contains("show-home"));
+  }
+
+  function bindChatHomeEvents() {
+    const newBtn = document.getElementById("chat-home-new-btn");
+    if (newBtn) newBtn.addEventListener("click", () => void actions.createSession());
+    const resumeBtn = document.getElementById("chat-home-resume-btn");
+    if (resumeBtn) resumeBtn.addEventListener("click", () => setChatHomeVisible(false));
+    setChatHomeVisible(!state.currentSessionId);
+  }
+
+  function bindChatHeaderEvents() {
+    document.getElementById("new-session-btn")?.addEventListener("click", () => void actions.createSession());
+    document.getElementById("chat-home-btn")?.addEventListener("click", toggleChatHome);
+    document.getElementById("usage-btn")?.addEventListener("click", openUsageModal);
+    document.getElementById("knowledge-btn")?.addEventListener("click", openKnowledgeModal);
+    bindStaticModalControls();
+    // chat-title 双击重命名当前会话
+    const title = document.getElementById("chat-title");
+    if (title) {
+      title.addEventListener("dblclick", () => {
+        if (state.currentSessionId) actions.renameSessionById?.(state.currentSessionId);
+      });
+    }
+  }
+
+  function bindStaticModalControls() {
+    if (staticModalBindingsBound) return;
+    staticModalBindingsBound = true;
+    document.querySelectorAll(".usage-tab").forEach((el) => {
+      el.addEventListener("click", () => switchUsageTab(el.dataset.tab));
+    });
+    document.querySelectorAll(".usage-range-btn").forEach((el) => {
+      el.addEventListener("click", () => {
+        const days = parseInt(el.dataset.days, 10);
+        document.querySelectorAll(".usage-range-btn").forEach((b) => b.classList.toggle("active", b === el));
+        setUsageDays(days);
+      });
+    });
+    document.querySelectorAll(".usage-metric-toggle").forEach((el) => {
+      el.addEventListener("click", () => toggleUsageMetric(el.dataset.metric));
+    });
   }
 
   function bindComposerEvents() {
@@ -550,7 +583,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
     state.inputEl.style.height = Math.min(state.inputEl.scrollHeight, 160) + "px";
   }
 
-  /* ---- Sidebar / Rail Collapse Toggle ---- */
+  /* ---- Sidebar / Explorer Collapse Toggle ---- */
 
   function initSidebarCollapse() {
     const sidebar = document.getElementById("sidebar");
@@ -560,6 +593,9 @@ export function createChatView({ state, documents, pickers, permissions, actions
     const collapsed = localStorage.getItem("sidebarCollapsed") === "true";
     if (collapsed) {
       sidebar.classList.add("collapsed");
+      sidebar.style.removeProperty("width");
+    } else {
+      applyExplorerWidth();
     }
     updateSidebarCollapseIcon();
 
@@ -567,6 +603,8 @@ export function createChatView({ state, documents, pickers, permissions, actions
       sidebar.classList.toggle("collapsed");
       const isCollapsed = sidebar.classList.contains("collapsed");
       localStorage.setItem("sidebarCollapsed", String(isCollapsed));
+      if (isCollapsed) sidebar.style.removeProperty("width");
+      else applyExplorerWidth();
       updateSidebarCollapseIcon();
       // Re-render lucide icons since we swapped the icon
       window.lucide?.createIcons();
@@ -579,7 +617,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
     if (!sidebar || !button) return;
 
     const isCollapsed = sidebar.classList.contains("collapsed");
-    const label = isCollapsed ? "展开侧栏" : "收起侧栏";
+    const label = isCollapsed ? "展开文件栏" : "收起文件栏";
     button.innerHTML = `<i data-lucide="${isCollapsed ? "panel-left-open" : "panel-left-close"}"></i>`;
     button.title = label;
     button.setAttribute("aria-label", label);
@@ -618,6 +656,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
   return {
     autoResizeInput,
     renderChatArea,
+    setChatHomeVisible,
     syncModelControls,
     refreshRecentModels,
   };
