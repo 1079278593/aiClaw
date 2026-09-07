@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 import type { Config } from "../../config/index.js";
 import { getPaths } from "../../config/paths.js";
 
@@ -68,9 +68,9 @@ export async function listAllowedFiles(config: Config, query: string): Promise<F
 }
 
 export function resolveAllowedImagePath(config: Config, inputPath: string): string {
-  const resolved = resolve(getPaths().base, inputPath.replaceAll("/", "\\"));
+  const resolved = resolve(getPaths().base, inputPath.replaceAll("\\", "/"));
   for (const { root } of getAllowedRoots(config)) {
-    if (resolved === root || resolved.startsWith(root + "\\")) return resolved;
+    if (resolved === root || resolved.startsWith(root + sep)) return resolved;
   }
   throw new Error("Image path not allowed");
 }

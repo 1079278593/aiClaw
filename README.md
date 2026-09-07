@@ -34,6 +34,8 @@ pnpm start
 
 浏览器打开 `http://127.0.0.1:3000`。启动时也可使用 `pnpm start -- -p 8080` 或 `pnpm start -- --host 0.0.0.0` 覆盖端口和地址。
 
+完成首次配置后，也可双击项目根目录的 `start.bat`（Windows）或 `start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
+
 `HYXCLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
 
 ## 配置

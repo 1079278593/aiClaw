@@ -1,5 +1,5 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname, resolve, sep } from "node:path";
 import { getPaths } from "../../config/paths.js";
 import { IMAGE_MIME_BY_EXT, isImageFile, isTextFile } from "./media.js";
 
@@ -23,7 +23,7 @@ export function resolveDocBrowserPath(inputPath: string): { relativePath: string
 
   const absolutePath = resolve(getPaths().base, relativePath);
   const expectedRoot = resolve(getPaths().base, parts[0]);
-  if (absolutePath !== expectedRoot && !absolutePath.startsWith(expectedRoot + "\\")) {
+  if (absolutePath !== expectedRoot && !absolutePath.startsWith(expectedRoot + sep)) {
     throw new Error("Document path not allowed");
   }
   return { relativePath, absolutePath };
