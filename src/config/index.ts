@@ -223,6 +223,13 @@ function mergeWithDefaults(userConfig: Partial<Config>): Config {
         fetchFormat: userConfig.tools?.tavily?.fetchFormat ?? DEFAULT_TOOLS_CONFIG.tavily.fetchFormat,
         maxFetchedChars: userConfig.tools?.tavily?.maxFetchedChars ?? DEFAULT_TOOLS_CONFIG.tavily.maxFetchedChars,
       },
+      trilium: {
+        enabled: userConfig.tools?.trilium?.enabled ?? DEFAULT_TOOLS_CONFIG.trilium.enabled,
+        baseUrl: userConfig.tools?.trilium?.baseUrl ?? DEFAULT_TOOLS_CONFIG.trilium.baseUrl,
+        token: userConfig.tools?.trilium?.token ?? DEFAULT_TOOLS_CONFIG.trilium.token,
+        ancestorNoteId: userConfig.tools?.trilium?.ancestorNoteId ?? DEFAULT_TOOLS_CONFIG.trilium.ancestorNoteId,
+        timeoutMs: userConfig.tools?.trilium?.timeoutMs ?? DEFAULT_TOOLS_CONFIG.trilium.timeoutMs,
+      },
     },
     compaction: {
       provider: userConfig.compaction?.provider ?? DEFAULT_CONFIG.compaction.provider,

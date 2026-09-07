@@ -3,6 +3,7 @@ import { loadAppState } from "../../app-state/index.js";
 import { flushUsage, getDailyStats, getUsageStats } from "../services/usage-store.js";
 import type { RouteHandler } from "../http-types.js";
 import { sendJson } from "../http-types.js";
+import { isTriliumEnabled } from "../../trilium/paths.js";
 
 export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, gitSyncEnabled }) => {
   if (url.pathname === "/health" && req.method === "GET") {
@@ -20,6 +21,7 @@ export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, 
       defaultModel: config.defaultModel,
       defaultThinkingEffort: config.defaultThinkingEffort,
       gitSyncEnabled,
+      triliumEnabled: isTriliumEnabled(config.tools.trilium.enabled, config.tools.trilium.token),
     });
     return true;
   }

@@ -14,7 +14,7 @@ export const handleContentRoutes: RouteHandler = async ({ req, res, url, config 
   }
   if (url.pathname === "/api/documents/tree" && req.method === "GET") {
     try {
-      sendJson(res, await listDocBrowserEntries(url.searchParams.get("path") ?? ""));
+      sendJson(res, await listDocBrowserEntries(url.searchParams.get("path") ?? "", config));
     } catch (error) {
       sendJson(res, { error: (error as Error).message || "Failed to load directory" }, 400);
     }
@@ -22,7 +22,7 @@ export const handleContentRoutes: RouteHandler = async ({ req, res, url, config 
   }
   if (url.pathname === "/api/documents/content" && req.method === "GET") {
     try {
-      sendJson(res, await readDocBrowserFile(url.searchParams.get("path") ?? ""));
+      sendJson(res, await readDocBrowserFile(url.searchParams.get("path") ?? "", config));
     } catch (error) {
       // 文件刚被删除（例如模型执行了 delete 工具）：返回 404 与友好提示，
       // 前端据此静默关闭失效的预览标签，而不是把原始 ENOENT 抛给用户。

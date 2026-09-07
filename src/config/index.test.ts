@@ -86,6 +86,13 @@ describe("config", () => {
     });
     expect(typeof config.tools.tavily.enabled).toBe("boolean");
     expect(typeof config.tools.tavily.apiKey).toBe("string");
+    expect(config.tools.trilium).toMatchObject({
+      enabled: false,
+      baseUrl: "http://127.0.0.1:8080",
+      token: "",
+      ancestorNoteId: "",
+      timeoutMs: 15_000,
+    });
 
     expect(saved).not.toHaveProperty("server");
     expect(saved).not.toHaveProperty("fs");

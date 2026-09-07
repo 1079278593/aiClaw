@@ -12,7 +12,17 @@ export function configureDocuments(options) {
   reportError = options.showError;
 }
 
-const DOC_BROWSER_ROOTS = ["knowledge_base", "inputs"];
+const LOCAL_DOC_BROWSER_ROOTS = ["knowledge_base", "inputs"];
+const TRILIUM_ROOT = "trilium";
+let triliumEnabled = false;
+
+function getDocBrowserRoots() {
+  return triliumEnabled ? [...LOCAL_DOC_BROWSER_ROOTS, TRILIUM_ROOT] : LOCAL_DOC_BROWSER_ROOTS;
+}
+
+function isTriliumDocPath(path) {
+  return typeof path === "string" && (path === TRILIUM_ROOT || path.startsWith(`${TRILIUM_ROOT}/`));
+}
 const DOC_ROOT_TAB_KEY = "docRootPath";
 const DOC_TABS_KEY = "docOpenTabs";
 const DOC_RECENT_KEY = "docRecentOpened";
@@ -47,11 +57,11 @@ let selectedPreviewEndLine = 0;
 function loadDocRootPath() {
   try {
     const stored = localStorage.getItem(DOC_ROOT_TAB_KEY);
-    if (stored && DOC_BROWSER_ROOTS.includes(stored)) return stored;
+    if (stored === TRILIUM_ROOT || LOCAL_DOC_BROWSER_ROOTS.includes(stored)) return stored;
   } catch {
     // ignore
   }
-  return DOC_BROWSER_ROOTS[0];
+  return LOCAL_DOC_BROWSER_ROOTS[0];
 }
 
 function saveDocRootPath() {
@@ -70,9 +80,9 @@ function loadOpenTabs() {
       .filter((tab) => tab && typeof tab.path === "string" && tab.path)
       .map((tab) => ({
         path: tab.path,
-        editMode: tab.editMode === true,
-        // 旧数据没有 sticky 字段，视为常驻标签
+        editMode: isTriliumDocPath(tab.path) ? false : tab.editMode === true,
         sticky: tab.sticky !== false,
+        label: typeof tab.label === "string" ? tab.label : undefined,
       }));
   } catch {
     return [];
@@ -244,7 +254,7 @@ export function clearPreviewSelection() {
 
 async function saveCurrentTabEdit() {
   const tab = openTabs.find((item) => item.path === activeTabPath);
-  if (!tab || !tab.editMode || docPreviewKind !== "text") return true;
+  if (!tab || !tab.editMode || docPreviewKind !== "text" || isTriliumDocPath(tab.path)) return true;
   const container = document.getElementById("doc-preview-content");
   const textarea = container?.querySelector(".doc-edit-textarea");
   if (!(textarea instanceof HTMLTextAreaElement)) return true;
@@ -266,7 +276,7 @@ async function saveCurrentTabEdit() {
 
 async function toggleDocEdit() {
   const tab = openTabs.find((item) => item.path === activeTabPath);
-  if (!tab || docPreviewKind !== "text") return;
+  if (!tab || docPreviewKind !== "text" || isTriliumDocPath(tab.path)) return;
   const container = document.getElementById("doc-preview-content");
   let scrollRatio = 0;
   if (tab.editMode) {
@@ -313,7 +323,7 @@ function updateDocSelectionStatus() {
   if (linesEl) linesEl.textContent = getDocSelectionStatusText();
   if (summaryEl) summaryEl.textContent = selectedPreviewSummary ? `"${selectedPreviewSummary}"` : "";
   const editIcon = getActiveTabEditMode() ? "log-out" : "pencil";
-  const editDisabled = !activeTabPath || docPreviewKind !== "text";
+  const editDisabled = !activeTabPath || docPreviewKind !== "text" || isTriliumDocPath(activeTabPath);
   // 同步预览工具栏和收起态竖条上的两个编辑按钮
   for (const editBtn of [document.getElementById("doc-edit-btn"), document.getElementById("doc-rail-edit-btn")]) {
     if (!editBtn) continue;
@@ -436,6 +446,9 @@ async function loadActiveTabContent() {
     docPreviewContent = data.content || "";
     docPreviewSupported = data.supported !== false;
     docPreviewKind = data.kind || (docPreviewSupported ? "text" : "unsupported");
+    const tab = openTabs.find((item) => item.path === activeTabPath);
+    if (tab && data.title) tab.label = data.title;
+    saveOpenTabs();
     clearPreviewSelection();
     recordRecentOpened(activeTabPath);
     updateDocPreviewPanel();
@@ -547,7 +560,7 @@ function renderDocTabs() {
   container.innerHTML = openTabs.map((tab) => `
     <button class="doc-tab ${tab.path === activeTabPath ? "active" : ""} ${tab.editMode ? "editing" : ""} ${tab.sticky ? "" : "temporary"}" data-tab-path="${escHtml(tab.path)}" type="button" title="${escHtml(tab.path)}${tab.sticky ? "" : "（临时标签，双击固定）"}" aria-label="标签 ${escHtml(tab.path)}">
       <i data-lucide="${tab.editMode ? "pencil" : "file-text"}" class="doc-tab-icon"></i>
-      <span class="doc-tab-label">${escHtml(tab.path.split("/").pop() || tab.path)}</span>
+      <span class="doc-tab-label">${escHtml(tab.label || tab.path.split("/").pop() || tab.path)}</span>
       <span class="doc-tab-close" data-close-tab-path="${escHtml(tab.path)}" role="button" tabindex="-1" title="关闭标签" aria-label="关闭标签 ${escHtml(tab.path)}"><i data-lucide="x" class="doc-tab-close-icon"></i></span>
     </button>
   `).join("");
@@ -593,10 +606,10 @@ function renderDocColumns() {
 
   const rootTabs = document.getElementById("doc-root-tabs");
   if (rootTabs) {
-    rootTabs.innerHTML = DOC_BROWSER_ROOTS.map((root) => `
+    rootTabs.innerHTML = getDocBrowserRoots().map((root) => `
       <button class="doc-root-tab ${root === docRootPath ? "active" : ""}" data-doc-root="${escHtml(root)}" type="button" role="tab" aria-selected="${root === docRootPath ? "true" : "false"}">
         <i data-lucide="folder" class="doc-root-tab-icon"></i>
-        <span class="doc-root-tab-label">${escHtml(root)}</span>
+        <span class="doc-root-tab-label">${escHtml(root === TRILIUM_ROOT ? "trilium（只读）" : root)}</span>
       </button>
     `).join("");
     window.lucide?.createIcons();
@@ -790,6 +803,17 @@ export function initRightPanel() {
   renderDocTabs();
   // 刷新/重建后重新加载当前根目录的文件树（初始状态 docSecondEntries 为空）
   void (async () => {
+    try {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      triliumEnabled = data?.triliumEnabled === true;
+    } catch {
+      triliumEnabled = false;
+    }
+    if (!getDocBrowserRoots().includes(docRootPath)) {
+      docRootPath = LOCAL_DOC_BROWSER_ROOTS[0];
+      saveDocRootPath();
+    }
     try {
       docSecondEntries = await fetchDocTree(docRootPath);
     } catch {

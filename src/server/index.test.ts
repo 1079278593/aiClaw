@@ -68,6 +68,13 @@ const mockConfig: Config = {
       fetchFormat: "markdown",
       maxFetchedChars: 20_000,
     },
+    trilium: {
+      enabled: false,
+      baseUrl: "http://127.0.0.1:8080",
+      token: "",
+      ancestorNoteId: "",
+      timeoutMs: 15_000,
+    },
   },
   compaction: { provider: "zai", model: "glm-4.5-air", thinkingEffort: "off", keepRecentRounds: 0 },
 };
@@ -266,6 +273,7 @@ describe("server", () => {
     expect(data.defaultModel).toBe("GLM-4.7");
     expect(data.defaultThinkingEffort).toBe("low");
     expect(data.gitSyncEnabled).toBe(true);
+    expect((data as { triliumEnabled?: boolean }).triliumEnabled).toBe(false);
     expect(data.providers.zai.models[0].id).toBe("GLM-4.5-Air");
     expect(data.providers.zai.models[1].thinking?.map((option) => option.id)).toEqual(["enabled"]);
     expect(data.providers.dashscope.models.some((model) => model.modal === "vl")).toBe(true);

@@ -61,6 +61,13 @@ const mockConfig: Config = {
       fetchFormat: "markdown",
       maxFetchedChars: 20_000,
     },
+    trilium: {
+      enabled: false,
+      baseUrl: "http://127.0.0.1:8080",
+      token: "",
+      ancestorNoteId: "",
+      timeoutMs: 15_000,
+    },
   },
   compaction: { provider: "zai", model: "glm-4.5-air", thinkingEffort: "off", keepRecentRounds: 0 },
 };

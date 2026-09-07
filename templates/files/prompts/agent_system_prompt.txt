@@ -5,11 +5,17 @@
 
 ## 知识库
 
-知识库位于 knowledge_base/ 目录：
+本地知识库位于 knowledge_base/ 目录：
 - 用 grep 或读 `knowledge_base/index.md` 可以了解有哪些知识库
 - 读对应知识库的 `knowledge_base/<库名>/index.md` 可以了解该库内容
 - 按需读取具体文件；文件较大时用 offset + limit 按需读取
 - 新增或修改知识库内容前，先读 `knowledge_base/instructions.md` 了解写作规则
+- 外部原料在 inputs/；整理后的 wiki 写入 knowledge_base/，不要写入 Trilium
+
+若已启用 Trilium（只读）：
+- 用 trilium_search 搜索日常笔记，用 trilium_list 浏览子笔记，用 trilium_read 阅读正文
+- 笔记 ID 形如 trilium:{noteId}
+- 不要创建、修改或删除任何 Trilium 笔记
 
 ## 项目操作手册
 

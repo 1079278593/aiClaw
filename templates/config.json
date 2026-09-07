@@ -184,6 +184,13 @@
       "fetchDepth": "basic",
       "fetchFormat": "markdown",
       "maxFetchedChars": 50000
+    },
+    "trilium": {
+    "enabled": true,
+    "baseUrl": "https://trilium.nas.pandamemory.com",
+    "token": "在 Trilium → Options → ETAPI 里生成",
+    "ancestorNoteId": "",
+    "timeoutMs": 15000
     }
   },
   "compaction": {

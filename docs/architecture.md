@@ -70,7 +70,14 @@ src/
 │   ├── registry.ts       # Module-level tool registry (register/get/clear)
 │   ├── executor.ts       # executeTool() dispatcher
 │   ├── file-tools.ts     # Built-in tools: list, read (text & images), write, edit, grep, move, delete
+│   ├── web-tools.ts      # Optional Tavily search/fetch
+│   ├── trilium-tools.ts  # Optional read-only Trilium tools
 │   └── fs-policy.ts      # Path sandboxing (resolveAllowedDirs, assertPathAllowed)
+├── trilium/              # Read-only Trilium ETAPI client
+│   ├── client.ts         # Search, list children, read content
+│   ├── html.ts           # HTML → readable text
+│   ├── paths.ts          # trilium:{noteId} and browser paths
+│   └── preview.ts        # Previewable note types
 ├── session/              # Session persistence
 │   └── index.ts          # CRUD: list, load, save, create, delete, addMessage
 ├── config/               # Configuration
@@ -139,7 +146,7 @@ $HYXCLAW_DATA_DIR/
 |--------|------|---------|
 | GET | `/` | Serve SPA UI |
 | GET | `/health` | Health check |
-| GET | `/api/config` | Available providers, models, defaults |
+| GET | `/api/config` | Available providers, models, defaults, `triliumEnabled` |
 | GET | `/api/sessions` | List all sessions |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/:id` | Load session messages |
@@ -153,9 +160,9 @@ $HYXCLAW_DATA_DIR/
 | POST | `/api/usage/flush` | Archive pending usage records |
 | GET | `/api/knowledge` | Knowledge base overview |
 | GET | `/api/commands` | Search configured commands |
-| GET | `/api/files` | Search allowed files |
-| GET/PUT | `/api/documents/content` | Read or update a text document |
-| GET | `/api/documents/tree` | Browse document roots |
+| GET | `/api/files` | Search allowed local files and, if enabled, Trilium notes |
+| GET/PUT | `/api/documents/content` | Read or update a text document (Trilium paths are read-only) |
+| GET | `/api/documents/tree` | Browse document roots (`knowledge_base`, `inputs`, optional `trilium`) |
 
 - **WebSocket message types**:
 
@@ -201,6 +208,8 @@ Server → Client:
 ### 3.5 Tools (`src/tools/`)
 - **Registry**: module-level `tools[]` array, `registerTool()`, `getTools()`, `initTools()` clears then re-registers
 - **Built-in tools**: `list`, `read`, `write`, `edit`, `grep`, `move`, `delete` — file operations under `$HYXCLAW_DATA_DIR/`. `read` handles both text and images: a text file returns its content (optional `offset`/`limit` line slicing; capped at 2000 lines / 50 KiB by default, soft-truncated with a notice on overflow), while an allowlisted PNG/JPEG/GIF/WebP file is returned as a multimodal tool result. The image branch is gated on the active model's vision support (`context.supportsImages`); non-vision models get a text error instead of the bytes.
+- **Optional Tavily tools** (`tools.tavily.enabled` + apiKey): `web_search`, `web_fetch`
+- **Optional Trilium tools** (`tools.trilium.enabled` + token): `trilium_search`, `trilium_list`, `trilium_read` — read-only ETAPI access via `src/trilium/`. Writes still go to local `knowledge_base/`. Note refs use `trilium:{noteId}`.
 - **Path sandboxing** (`fs-policy.ts`): `resolveAllowedDirs()` resolves relative paths against data dir, `assertPathAllowed()` enforces whitelist
 - **`executeTool()`**: dispatches tool calls by name, returns `ToolResult { content, isError? }`
 
@@ -218,7 +227,7 @@ Server → Client:
 - `GET /api/knowledge` parses `index.md` table and lists directories for the UI overview
 
 ### 3.9 Config (`src/config/`)
-- **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `maxToolCalls`, `server` (port/host), `fs` (allowedDirs/allowedFiles), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
+- **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `maxToolCalls`, `server` (port/host), `fs` (allowedDirs/allowedFiles), `tools` (tavily, trilium), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
 - **Supported providers**: `zai` (智谱), `dashscope` (阿里百炼)
 - **Thinking levels**: the UI always adds `none`; each model's `thinking` list supplies provider-native values (for example, DeepSeek `high` / `max`). `none` is sent explicitly as that provider's disable parameter.
 - **`$HYXCLAW_DATA_DIR`** must be set via `.env` file, no default fallback

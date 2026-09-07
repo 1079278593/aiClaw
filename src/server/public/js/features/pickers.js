@@ -66,6 +66,28 @@ export function createPickerFeature({ state, autoResizeInput, updateSendAvailabi
     });
   }
 
+  function isTriliumMentionPath(path) {
+    return typeof path === "string" && (path === "trilium" || path.startsWith("trilium/") || path.startsWith("trilium:"));
+  }
+
+  function toMentionPath(path) {
+    if (!path) return path;
+    if (path.startsWith("trilium:")) return path;
+    if (path === "trilium" || path.startsWith("trilium/")) {
+      const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
+      const noteId = parts[parts.length - 1];
+      if (noteId && noteId !== "trilium") return `trilium:${noteId}`;
+    }
+    return path;
+  }
+
+  function filePickerLabel(file) {
+    const path = toMentionPath(file.path || "");
+    const source = file.source || (isTriliumMentionPath(file.path || "") ? "trilium" : "");
+    const base = file.name ? `${file.name}  ${path}` : path;
+    return source === "trilium" ? `[trilium] ${base}` : base;
+  }
+
   function buildFileList() {
     const empty = document.getElementById("file-picker-empty");
     const list = document.getElementById("file-picker-list");
@@ -74,9 +96,9 @@ export function createPickerFeature({ state, autoResizeInput, updateSendAvailabi
     filePickerFiles.forEach((file, index) => {
       const item = document.createElement("div");
       item.className = "file-picker-item";
-      item.dataset.path = file.path;
+      item.dataset.path = toMentionPath(file.path);
       item.dataset.index = String(index);
-      item.innerHTML = `<span>${escHtml(file.path)}</span>`;
+      item.innerHTML = `<span>${escHtml(filePickerLabel(file))}</span>`;
       list.appendChild(item);
     });
   }
@@ -125,7 +147,10 @@ export function createPickerFeature({ state, autoResizeInput, updateSendAvailabi
       // 置顶：最近打开过的文件（最多 3 个，MRU 顺序）+ 当前打开的标签页，去重
       const recentFiles = [...new Set([...getRecentOpenedPaths(), ...getOpenTabPaths()])]
         .filter((filePath) => filePath.toLocaleLowerCase().includes(normalizedQuery))
-        .map((filePath) => ({ path: filePath }));
+        .map((filePath) => ({
+          path: toMentionPath(filePath),
+          source: isTriliumMentionPath(filePath) ? "trilium" : undefined,
+        }));
       const recentPaths = new Set(recentFiles.map((file) => file.path));
       const matchedFiles = Array.isArray(data?.files) ? data.files : [];
       filePickerFiles = [...recentFiles, ...matchedFiles.filter((file) => !recentPaths.has(file.path))];

@@ -91,8 +91,17 @@ export const DEFAULT_TAVILY_TOOL_CONFIG = {
   maxFetchedChars: 20_000,
 };
 
+export const DEFAULT_TRILIUM_TOOL_CONFIG = {
+  enabled: false,
+  baseUrl: "http://127.0.0.1:8080",
+  token: "",
+  ancestorNoteId: "",
+  timeoutMs: 15_000,
+};
+
 export const DEFAULT_TOOLS_CONFIG = {
   tavily: DEFAULT_TAVILY_TOOL_CONFIG,
+  trilium: DEFAULT_TRILIUM_TOOL_CONFIG,
 };
 
 export const CompactionConfigSchema = z.object({
@@ -118,8 +127,17 @@ export const TavilyToolConfigSchema = z.object({
   maxFetchedChars: z.number().int().min(1000).max(200_000).default(20_000),
 });
 
+export const TriliumToolConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().url().default("http://127.0.0.1:8080"),
+  token: z.string().default(""),
+  ancestorNoteId: z.string().default(""),
+  timeoutMs: z.number().int().min(1000).max(120_000).default(15_000),
+});
+
 export const ToolsConfigSchema = z.object({
   tavily: TavilyToolConfigSchema.default(DEFAULT_TAVILY_TOOL_CONFIG),
+  trilium: TriliumToolConfigSchema.default(DEFAULT_TRILIUM_TOOL_CONFIG),
 });
 
 export const DEFAULT_SERVER_CONFIG = {
@@ -218,4 +236,5 @@ export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 export type FSConfig = z.infer<typeof FSConfigSchema>;
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type TavilyToolConfig = z.infer<typeof TavilyToolConfigSchema>;
+export type TriliumToolConfig = z.infer<typeof TriliumToolConfigSchema>;
 export type CompactionConfig = z.infer<typeof CompactionConfigSchema>;
