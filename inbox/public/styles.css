@@ -1,0 +1,124 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f1eb;
+  --card: #fffdf8;
+  --text: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --accent: #0f766e;
+  --accent-text: #f0fdfa;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --card: #292524;
+    --text: #fafaf9;
+    --muted: #a8a29e;
+    --line: #44403c;
+    --accent: #2dd4bf;
+    --accent-text: #042f2e;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 16px 16px 40px;
+}
+
+.header h1 {
+  margin: 0 0 8px;
+  font-size: 1.4rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.card {
+  margin-top: 16px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.hidden { display: none; }
+
+label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+input, select, textarea, button {
+  width: 100%;
+  font: inherit;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  background: transparent;
+  color: var(--text);
+}
+
+textarea { resize: vertical; min-height: 120px; }
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.row select { flex: 1; }
+.row button { width: auto; white-space: nowrap; }
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+.status {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.status.error { color: #b91c1c; }
+.status.ok { color: #047857; }
+
+.create-box {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.create-box summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+code {
+  font-size: 0.85em;
+}

@@ -5,9 +5,9 @@
 
 import path from "node:path";
 import { getUserDataDir } from "../config/paths.js";
-import { HyxClawError } from "../errors/index.js";
+import { AiClawError } from "../errors/index.js";
 
-export class ToolError extends HyxClawError {
+export class ToolError extends AiClawError {
   constructor(message: string) {
     super(message, "TOOL_ERROR");
     this.name = "ToolError";

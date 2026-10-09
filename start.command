@@ -89,23 +89,49 @@ ensure_pnpm() {
   echo "pnpm $(pnpm -v)"
 }
 
-write_data_dir() {
-  local dir="$1"
+write_env_var() {
+  local key="$1"
+  local value="$2"
   local tmp
   tmp="$(mktemp)"
-  if [ -f .env ] && grep -qE '^[[:space:]]*HYXCLAW_DATA_DIR=' .env; then
-    awk -v dir="$dir" '
-      /^[[:space:]]*HYXCLAW_DATA_DIR=/ { print "HYXCLAW_DATA_DIR=" dir; next }
+  if [ -f .env ] && grep -qE "^[[:space:]]*${key}=" .env; then
+    awk -v key="$key" -v value="$value" '
+      $0 ~ "^[[:space:]]*" key "=" { print key "=" value; next }
       { print }
     ' .env > "$tmp"
     mv "$tmp" .env
   else
     {
       [ -f .env ] && cat .env
-      printf 'HYXCLAW_DATA_DIR=%s\n' "$dir"
+      printf '%s=%s\n' "$key" "$value"
     } > "$tmp"
     mv "$tmp" .env
   fi
+}
+
+write_data_dir() {
+  write_env_var "AICLAW_DATA_DIR" "$1"
+}
+
+read_env_var() {
+  local key="$1"
+  local line
+  [ -f .env ] || return 0
+  line="$(grep -E "^[[:space:]]*${key}=" .env | tail -1 | tr -d '\r')"
+  [ -n "$line" ] || return 0
+  line="${line#*=}"
+  line="${line%\"}"
+  line="${line#\"}"
+  line="${line%\'}"
+  line="${line#\'}"
+  printf '%s' "$line"
+}
+
+dir_is_empty() {
+  local d="$1"
+  [ ! -e "$d" ] && return 0
+  [ -d "$d" ] || return 1
+  [ -z "$(ls -A "$d" 2>/dev/null)" ]
 }
 
 expand_path() {
@@ -126,7 +152,7 @@ ensure_env() {
     if [ -f .env.example ]; then
       cp .env.example .env
     else
-      printf 'HYXCLAW_DATA_DIR=%s\n' "$DEFAULT_DATA_DIR" > .env
+      printf 'AICLAW_DATA_DIR=%s\n' "$DEFAULT_DATA_DIR" > .env
     fi
   fi
 
@@ -138,30 +164,72 @@ ensure_env() {
 
   echo
   echo "数据目录用来放知识库、会话和 config.json。"
-  echo "这个路径会写入项目根目录的 .env（HYXCLAW_DATA_DIR），不是让你重复填写已有配置。"
+  echo "这个路径会写入项目根目录的 .env（AICLAW_DATA_DIR），不是让你重复填写已有配置。"
   echo "直接回车使用默认目录；若你已经有数据文件夹，再粘贴那个路径。"
   printf "数据目录 [%s]: " "$DEFAULT_DATA_DIR"
   read -r data_dir
   data_dir="$(expand_path "${data_dir:-$DEFAULT_DATA_DIR}")"
 
+  write_data_dir "$data_dir"
+  echo "已写入 $(pwd)/.env"
+  echo "  AICLAW_DATA_DIR=$data_dir"
+}
+
+read_data_dir() {
+  read_env_var "AICLAW_DATA_DIR"
+}
+
+# 数据目录已有内容则直接用；不存在/为空时：有 AICLAW_DATA_GIT_URL 则 clone，否则本地建目录（随后 init）
+# 不在启动时自动 git pull，同步请手动或用应用内 Git 同步
+ensure_data_dir() {
+  local data_dir git_url
+  data_dir="$(read_data_dir)"
+  if [ -z "$data_dir" ]; then
+    echo "[错误] .env 中未设置 AICLAW_DATA_DIR。"
+    pause_exit 1
+  fi
+
+  if [ -f "$data_dir/config.json" ]; then
+    echo "数据目录：$data_dir"
+    return 0
+  fi
+
+  if [ -e "$data_dir" ] && ! dir_is_empty "$data_dir"; then
+    echo "数据目录已存在但尚未初始化：$data_dir"
+    return 0
+  fi
+
+  git_url="$(read_env_var "AICLAW_DATA_GIT_URL")"
+  if [ -n "$git_url" ]; then
+    if ! command -v git >/dev/null 2>&1; then
+      echo "[错误] .env 中配置了 AICLAW_DATA_GIT_URL，但未找到 git。"
+      pause_exit 1
+    fi
+    if [ -d "$data_dir" ]; then
+      rmdir "$data_dir" 2>/dev/null || {
+        echo "[错误] 无法清空空目录以进行克隆：$data_dir"
+        pause_exit 1
+      }
+    fi
+    echo "数据目录不存在，正在从 Gitea 克隆："
+    echo "  $git_url"
+    echo "  → $data_dir"
+    if ! git clone "$git_url" "$data_dir"; then
+      echo "[错误] git clone 失败。请检查 AICLAW_DATA_GIT_URL 与本机 Git 凭据。"
+      pause_exit 1
+    fi
+    echo "克隆完成。"
+    if [ ! -f "$data_dir/config.json" ]; then
+      echo "[警告] 克隆结果中没有 config.json，稍后将尝试本地 init。"
+    fi
+    return 0
+  fi
+
   if ! mkdir -p "$data_dir"; then
     echo "[错误] 无法创建目录：$data_dir"
     pause_exit 1
   fi
-  write_data_dir "$data_dir"
-  echo "已写入 $(pwd)/.env"
-  echo "  HYXCLAW_DATA_DIR=$data_dir"
-}
-
-read_data_dir() {
-  local line
-  line="$(grep -E '^[[:space:]]*HYXCLAW_DATA_DIR=' .env | tail -1 | tr -d '\r')"
-  line="${line#*=}"
-  line="${line%\"}"
-  line="${line#\"}"
-  line="${line%\'}"
-  line="${line#\'}"
-  printf '%s' "$line"
+  echo "已准备本地数据目录：$data_dir（未配置 AICLAW_DATA_GIT_URL，将本地 init）"
 }
 
 ensure_deps() {
@@ -210,7 +278,7 @@ ensure_init() {
   local data_dir
   data_dir="$(read_data_dir)"
   if [ -z "$data_dir" ]; then
-    echo "[错误] .env 中未设置 HYXCLAW_DATA_DIR。"
+    echo "[错误] .env 中未设置 AICLAW_DATA_DIR。"
     pause_exit 1
   fi
   if [ -f "$data_dir/config.json" ]; then
@@ -233,6 +301,7 @@ load_node_env
 ensure_node
 ensure_pnpm
 ensure_env
+ensure_data_dir
 ensure_deps
 ensure_build
 ensure_init

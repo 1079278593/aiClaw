@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
     try {
-      const theme = localStorage.getItem("hyxclaw-theme");
+      const theme = localStorage.getItem("aiclaw-theme");
       if (["light", "daylight", "monochrome"].includes(theme)) {
         document.documentElement.setAttribute("data-theme", theme);
       }
     } catch {}
   </script>
-  <title>hyxClaw</title>
+  <title>aiClaw</title>
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles/tokens.css">
   <link rel="stylesheet" href="/styles/base.css">
@@ -27,7 +27,7 @@
 <div id="sidebar" aria-label="文档浏览">
   <div id="sidebar-header">
     <div class="sidebar-brand">
-      <h1>hyxClaw</h1>
+      <h1>aiClaw</h1>
     </div>
     <button id="sidebar-collapse-btn" class="icon-button" aria-label="收起文件栏" title="收起文件栏">
       <i data-lucide="panel-left-close"></i>
@@ -253,7 +253,7 @@
 
       <h2>一般流程</h2>
       <ol>
-        <li>外部文件或图片放入<code>${HYXCLAW_DATA_DIR}/inputs/</code>中，或提供网址供AI读取</li>
+        <li>外部文件或图片放入<code>${AICLAW_DATA_DIR}/inputs/</code>中，或提供网址供AI读取</li>
         <li>在左侧选择文件，在中间阅读区划选关键内容（或直接基于打开的文档）</li>
         <li>在右侧与AI聊天总结该文档主要内容</li>
         <li>要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件。</li>
@@ -344,7 +344,7 @@
       <p>程序不会自动 stash、merge、rebase、force push 或覆盖文件。遇到异常请在数据目录的终端中手动处理。非回环地址监听时，同步按钮和 Git 接口都会隐藏/禁用。</p>
 
       <h2>异地使用</h2>
-      <p>所有的本地数据就放置在<code>${HYXCLAW_DATA_DIR}</code>这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。</p>
+      <p>所有的本地数据就放置在<code>${AICLAW_DATA_DIR}</code>这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。</p>
     </div>
   </div>
 </div>

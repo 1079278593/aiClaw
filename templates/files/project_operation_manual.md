@@ -1,4 +1,4 @@
-# hyxClaw 项目操作手册
+# aiClaw 项目操作手册
 
 ## 功能
 
@@ -28,7 +28,7 @@
 
 ### 一般流程
 
-1. 外部文件或图片放入${HYXCLAW_DATA_DIR}/inputs/中，或提供网址供AI读取；日常已记在 Trilium 里的内容可让 AI 搜索阅读（需启用 tools.trilium，只读）
+1. 外部文件或图片放入${AICLAW_DATA_DIR}/inputs/中，或提供网址供AI读取；日常已记在 Trilium 里的内容可让 AI 搜索阅读（需启用 tools.trilium，只读）
 2. 与AI聊天总结该文档主要内容
 3. 要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件（写入本地 knowledge_base/，不会改 Trilium）
 
@@ -146,4 +146,4 @@
 
 ### 异地使用
 
-所有的本地数据就放置在${HYXCLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。
+所有的本地数据就放置在${AICLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。

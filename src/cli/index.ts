@@ -5,6 +5,7 @@
  */
 
 import { Command } from "commander";
+import { BRAND_NAME, BRAND_SLUG } from "../brand.js";
 import { getLogger } from "../logger/index.js";
 import { startServer } from "../server/index.js";
 import { initConfig, loadConfigWithoutApiKey, getDefaultProviderCredential } from "../config/index.js";
@@ -13,7 +14,7 @@ import { getPaths, pathExists } from "../config/paths.js";
 const program = new Command();
 
 program
-  .name("hyxclaw")
+  .name(BRAND_SLUG)
   .description("Personal AI Assistant")
   .version("0.1.0");
 
@@ -22,7 +23,7 @@ program
  */
 program
   .command("start")
-  .description("Start the hyxClaw server")
+  .description(`Start the ${BRAND_NAME} server`)
   .option("-p, --port <number>", "Port to listen on", undefined)
   .option("-h, --host <address>", "Host address to bind to", undefined)
   .action(async (options) => {
@@ -129,7 +130,7 @@ program
       const config = await loadConfigWithoutApiKey();
       const apiKeySet = Boolean(config.providers[config.defaultProvider]?.apiKey);
 
-      console.log("\n=== hyxClaw Status ===");
+      console.log(`\n=== ${BRAND_NAME} Status ===`);
       console.log(`Data directory: ${paths.base}`);
       console.log(`Config file: ${configExists ? paths.config : `${paths.config} (not initialized)`}`);
       console.log(`Provider: ${config.defaultProvider}`);
@@ -139,11 +140,11 @@ program
       console.log("");
 
       if (!configExists) {
-        console.log("Run 'hyxclaw init' to create the default configuration.");
+        console.log(`Run '${BRAND_SLUG} init' to create the default configuration.`);
       } else if (!apiKeySet) {
         console.log(`Set the API key in ${paths.config} before starting the server.`);
       } else {
-        console.log("Ready to start. Run 'hyxclaw start'.");
+        console.log(`Ready to start. Run '${BRAND_SLUG} start'.`);
       }
     } catch (error) {
       logger.error(`Status check failed: ${(error as Error).message}`);

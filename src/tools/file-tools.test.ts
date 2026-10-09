@@ -21,7 +21,7 @@ let knowledgeBaseDir: string;
 let tools: ReturnType<typeof createFileTools>;
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(path.join(os.tmpdir(), "hyxclaw-test-"));
+  tmpDir = await mkdtemp(path.join(os.tmpdir(), "aiclaw-test-"));
   inputsDir = path.join(tmpDir, "inputs");
   knowledgeBaseDir = path.join(tmpDir, "knowledge_base");
   await mkdir(inputsDir);

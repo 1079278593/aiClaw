@@ -7,26 +7,27 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import dotenv from "dotenv";
+import {
+  BRAND_SLUG,
+  dataDirEnvMissingMessage,
+  getDataDirFromEnv,
+} from "../brand.js";
+
 dotenv.config();
 
 /**
  * Get the user data directory
  *
- * Must be configured via .env file: HYXCLAW_DATA_DIR=/path/to/data
+ * Must be configured via .env file: AICLAW_DATA_DIR=/path/to/data
  * This is required - no default value provided to avoid confusion
  */
 export function getUserDataDir(): string {
-  const envDir = process.env.HYXCLAW_DATA_DIR;
+  const envDir = getDataDirFromEnv();
   if (envDir) {
     return envDir;
   }
 
-  throw new Error(
-    "HYXCLAW_DATA_DIR environment variable is not set!\n" +
-    "Please create a .env file in the project root with:\n" +
-    "HYXCLAW_DATA_DIR=/path/to/your/data/directory\n\n" +
-    "See .env.example for reference."
-  );
+  throw new Error(dataDirEnvMissingMessage());
 }
 
 /**
@@ -97,5 +98,5 @@ export async function pathExists(filePath: string): Promise<boolean> {
  */
 export function getTestDir(): string {
   const testId = crypto.randomBytes(8).toString("hex");
-  return path.join(os.tmpdir(), `hyxclaw-test-${testId}`);
+  return path.join(os.tmpdir(), `${BRAND_SLUG}-test-${testId}`);
 }

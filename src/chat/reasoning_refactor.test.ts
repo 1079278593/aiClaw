@@ -90,7 +90,7 @@ describe("reasoning refactor", () => {
 
   beforeEach(async () => {
     testDir = path.join(process.cwd(), ".test-data", `reasoning-refactor-${randomBytes(8).toString("hex")}`);
-    process.env.HYXCLAW_DATA_DIR = testDir;
+    process.env.AICLAW_DATA_DIR = testDir;
     await mkdir(path.join(testDir, "files", "prompts"), { recursive: true });
     clearTools();
     completeMock.mockReset();

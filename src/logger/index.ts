@@ -4,6 +4,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import {
+  BRAND_SLUG,
+  dataDirEnvMissingMessage,
+  getDataDirFromEnv,
+} from "../brand.js";
 import { LogLevel, LOG_LEVELS, RESET_COLOR, type LogLevelConfig } from "./levels.js";
 export { LogLevel } from "./levels.js";
 
@@ -41,7 +46,7 @@ export class Logger {
 
   private setCurrentLogFile(): void {
     const date = new Date().toISOString().split("T")[0];
-    this.currentLogFile = path.join(this.logDir, `hyxclaw-${date}.log`);
+    this.currentLogFile = path.join(this.logDir, `${BRAND_SLUG}-${date}.log`);
   }
 
   private formatTimestamp(): string {
@@ -125,16 +130,12 @@ export function getLogger(logDir?: string): Logger {
     // If no logDir provided, use user data directory
     if (!logDir) {
       // Check environment variable (includes .env file)
-      const envDir = process.env.HYXCLAW_DATA_DIR;
+      const envDir = getDataDirFromEnv();
       if (envDir) {
         logDir = path.join(envDir, "logs");
       } else {
         // No default - require explicit configuration
-        throw new Error(
-          'HYXCLAW_DATA_DIR environment variable is not set!\n' +
-          'Please create a .env file in the project root with:\n' +
-          'HYXCLAW_DATA_DIR=/path/to/your/data/directory'
-        );
+        throw new Error(dataDirEnvMissingMessage());
       }
     }
     defaultLogger = new Logger({ logDir });

@@ -10,7 +10,7 @@
 
 ### `GET /api/knowledge`
 
-扫描 `$HYXCLAW_DATA_DIR/knowledge_base/` 目录，返回所有知识库的信息。
+扫描 `$AICLAW_DATA_DIR/knowledge_base/` 目录，返回所有知识库的信息。
 
 **响应格式：**
 

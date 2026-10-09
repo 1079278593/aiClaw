@@ -59,7 +59,7 @@ interface UsageRecord {
 
 ### 2.4 持久化
 
-- 每次请求完成后，将 `UsageRecord` 以 JSONL 格式追加写入 `$HYXCLAW_DATA_DIR/files/usage.jsonl`
+- 每次请求完成后，将 `UsageRecord` 以 JSONL 格式追加写入 `$AICLAW_DATA_DIR/files/usage.jsonl`
 - 文件不存在时自动创建
 - 不做读取/查询优化，统计页面直接读全文件
 
@@ -80,10 +80,10 @@ interface UsageRecord {
 
 每次调用 `GET /api/usage/stats` 时，后端执行以下流程：
 
-1. 读取 `$HYXCLAW_DATA_DIR/files/usage.jsonl`
+1. 读取 `$AICLAW_DATA_DIR/files/usage.jsonl`
 2. 若文件非空：
    a. 将本次数据按 `provider + model` 聚合
-   b. 读取历史归档 `$HYXCLAW_DATA_DIR/files/usage_archive.json`（不存在则视为空）
+   b. 读取历史归档 `$AICLAW_DATA_DIR/files/usage_archive.json`（不存在则视为空）
    c. 将本次聚合结果合并到历史归档，写回 `usage_archive.json`
    d. 清空 `usage.jsonl`（截断为空文件）
 3. 返回 `usage_archive.json` 中的全部聚合数据

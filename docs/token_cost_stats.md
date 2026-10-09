@@ -179,7 +179,7 @@ cost = ((未缓存输入) * input
 
 ## 4. 持久化与数据流
 
-### 文件布局（`$HYXCLAW_DATA_DIR/files/`）
+### 文件布局（`$AICLAW_DATA_DIR/files/`）
 
 | 文件 | 内容 | 颗粒度 | 生命周期 |
 |---|---|---|---|

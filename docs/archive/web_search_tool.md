@@ -1,6 +1,6 @@
 # Web Search / Fetch Tool 规划
 
-目标：给 hyxClaw 增加一组联网工具，让 agent 可以在需要最新信息、外部资料、来源链接时搜索网页，并在拿到 URL 后读取网页正文。
+目标：给 aiClaw 增加一组联网工具，让 agent 可以在需要最新信息、外部资料、来源链接时搜索网页，并在拿到 URL 后读取网页正文。
 
 参考文档：https://docs.tavily.com/documentation/api-reference/endpoint/search
 参考文档：https://docs.tavily.com/sdk/javascript/reference

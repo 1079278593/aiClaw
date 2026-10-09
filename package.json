@@ -1,11 +1,11 @@
 {
-  "name": "hyxclaw",
+  "name": "aiclaw",
   "version": "0.1.0",
   "description": "Personal AI Assistant",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "hyxclaw": "dist/cli/index.js"
+    "aiclaw": "dist/cli/index.js"
   },
   "files": [
     "dist",

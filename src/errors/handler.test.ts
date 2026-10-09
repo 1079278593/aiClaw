@@ -4,27 +4,27 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
-  HyxClawError,
+  AiClawError,
   ConfigError,
   LLMError,
   FileSystemError,
   isError,
-  isHyxClawError,
+  isAiClawError,
 } from "./index.js";
 import { ToolError } from "../tools/fs-policy.js";
 import { ErrorHandler, withErrorHandling, withSyncErrorHandling } from "./handler.js";
 
 describe("Custom Errors", () => {
-  it("should create HyxClawError with code", () => {
-    const error = new HyxClawError("Test error", "TEST_CODE");
+  it("should create AiClawError with code", () => {
+    const error = new AiClawError("Test error", "TEST_CODE");
     expect(error.message).toBe("Test error");
     expect(error.code).toBe("TEST_CODE");
-    expect(error.name).toBe("HyxClawError");
+    expect(error.name).toBe("AiClawError");
   });
 
-  it("should create HyxClawError with details", () => {
+  it("should create AiClawError with details", () => {
     const details = { key: "value" };
-    const error = new HyxClawError("Test error", "TEST_CODE", details);
+    const error = new AiClawError("Test error", "TEST_CODE", details);
     expect(error.details).toEqual(details);
   });
 
@@ -46,11 +46,11 @@ describe("Custom Errors", () => {
     expect(error.name).toBe("FileSystemError");
   });
 
-  it("should create ToolError (from fs-policy) and be instanceof HyxClawError", () => {
+  it("should create ToolError (from fs-policy) and be instanceof AiClawError", () => {
     const error = new ToolError("Tool execution failed");
     expect(error.code).toBe("TOOL_ERROR");
     expect(error.name).toBe("ToolError");
-    expect(error instanceof HyxClawError).toBe(true);
+    expect(error instanceof AiClawError).toBe(true);
   });
 });
 
@@ -61,10 +61,10 @@ describe("Error Type Guards", () => {
     expect(isError("not an error")).toBe(false);
   });
 
-  it("should identify HyxClawError instances", () => {
-    const error = new HyxClawError("Test", "TEST");
-    expect(isHyxClawError(error)).toBe(true);
-    expect(isHyxClawError(new Error("Test"))).toBe(false);
+  it("should identify AiClawError instances", () => {
+    const error = new AiClawError("Test", "TEST");
+    expect(isAiClawError(error)).toBe(true);
+    expect(isAiClawError(new Error("Test"))).toBe(false);
   });
 });
 
@@ -80,12 +80,12 @@ describe("ErrorHandler", () => {
     expect(() => handler.handle(error)).not.toThrow();
   });
 
-  it("should handle HyxClawError", () => {
+  it("should handle AiClawError", () => {
     const mockLogger = {
       error: vi.fn(),
     };
     const handler = new ErrorHandler({ logger: mockLogger as any });
-    const error = new HyxClawError("Test error", "TEST_CODE");
+    const error = new AiClawError("Test error", "TEST_CODE");
 
     handler.handle(error);
 

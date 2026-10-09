@@ -1,6 +1,7 @@
+import { readStorage, storageKey, writeStorage } from "../brand.js";
+
 const THEMES = new Set(["light", "daylight", "monochrome"]);
-const SHOW_PROCESS_STORAGE_KEY = "hyxclaw-show-process-enabled";
-const LEGACY_SHOW_PROCESS_STORAGE_KEY = "hyxclaw-show-process";
+const SHOW_PROCESS_STORAGE_KEY = storageKey("show-process-enabled");
 
 const FONT_MAP = {
   system: "system-ui, -apple-system, sans-serif",
@@ -18,31 +19,31 @@ export function initSettings() {
   const setTheme = (theme) => {
     const selectedTheme = THEMES.has(theme) ? theme : "light";
     document.documentElement.setAttribute("data-theme", selectedTheme);
-    localStorage.setItem("hyxclaw-theme", selectedTheme);
+    writeStorage("theme", selectedTheme);
     updateThemeActive();
   };
-  setTheme(localStorage.getItem("hyxclaw-theme") || "light");
+  setTheme(readStorage("theme") || "light");
 
   const updateFontActive = () => {
-    const current = localStorage.getItem("hyxclaw-font") || "system";
+    const current = readStorage("font") || "system";
     document.querySelectorAll(".settings-option[data-font]").forEach((element) => {
       element.classList.toggle("active", element.dataset.font === current);
     });
   };
   const setFont = (font) => {
     document.documentElement.style.setProperty("--md-font-family", FONT_MAP[font] || FONT_MAP.system);
-    localStorage.setItem("hyxclaw-font", font);
+    writeStorage("font", font);
     updateFontActive();
   };
-  setFont(localStorage.getItem("hyxclaw-font") || "system");
+  setFont(readStorage("font") || "system");
 
   const setFontSize = (size) => {
     document.documentElement.style.setProperty("--md-font-size", size + "px");
-    localStorage.setItem("hyxclaw-font-size", size);
+    writeStorage("font-size", String(size));
     const label = document.getElementById("font-size-label");
     if (label) label.textContent = size + "px";
   };
-  const size = Number(localStorage.getItem("hyxclaw-font-size") || 15);
+  const size = Number(readStorage("font-size") || 15);
   const slider = document.getElementById("font-size-slider");
   if (slider) {
     slider.value = size;
@@ -54,7 +55,6 @@ export function initSettings() {
     document.documentElement.dataset.showProcess = String(showProcess);
     if (showProcess) localStorage.setItem(SHOW_PROCESS_STORAGE_KEY, "true");
     else localStorage.removeItem(SHOW_PROCESS_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_SHOW_PROCESS_STORAGE_KEY);
     const checkbox = document.getElementById("show-process-checkbox");
     if (checkbox) checkbox.checked = showProcess;
   };

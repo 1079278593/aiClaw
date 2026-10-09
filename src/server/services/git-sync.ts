@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { BRAND_NAME } from "../../brand.js";
 import { getPaths } from "../../config/paths.js";
 
 const GIT_TIMEOUT_MS = 30_000;
@@ -89,7 +90,7 @@ function getCommitMessage(): string {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
   const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  return `hyxClaw sync: ${timestamp}`;
+  return `${BRAND_NAME} sync: ${timestamp}`;
 }
 
 async function getStatusForDirectory(dataDir: string): Promise<GitSyncStatus> {

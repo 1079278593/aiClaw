@@ -33,7 +33,7 @@ describe("config", () => {
     await cleanupTestDir(testDir);
   });
 
-  it("getUserDataDir reads HYXCLAW_DATA_DIR", () => {
+  it("getUserDataDir reads AICLAW_DATA_DIR", () => {
     expect(getUserDataDir()).toBe(testDir);
   });
 

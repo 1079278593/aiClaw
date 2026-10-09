@@ -1,4 +1,4 @@
-# hyxClaw
+# aiClaw
 
 介绍视频：https://www.bilibili.com/video/BV1CeKY6SEbw/
 
@@ -17,7 +17,7 @@ pnpm install
 
 在项目根目录创建 .env，并指定用户数据目录
 ```
-HYXCLAW_DATA_DIR=D:\MyData
+AICLAW_DATA_DIR=D:\MyData
 ```
 
 复制模板、创建所需目录，并生成配置文件
@@ -25,7 +25,7 @@ HYXCLAW_DATA_DIR=D:\MyData
 pnpm dev init
 ```
 
-编辑 ${HYXCLAW_DATA_DIR}\config.json，填入模型提供商和搜索提供商的 API Key；默认模型提供商API Key必填，否则无法启动，其他API Key不填则相应功能禁用。
+编辑 ${AICLAW_DATA_DIR}\config.json，填入模型提供商和搜索提供商的 API Key；默认模型提供商API Key必填，否则无法启动，其他API Key不填则相应功能禁用。
 
 ```
 pnpm build
@@ -36,11 +36,11 @@ pnpm start
 
 完成首次配置后，也可双击项目根目录的 `start.bat`（Windows）或 `start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
 
-`HYXCLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
+`AICLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
 
 ## 配置
 
-首次执行 `init` 后，模板配置写入 `{HYXCLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](templates/config.json) 为准；以下示例展示配置结构：
+首次执行 `init` 后，模板配置写入 `{AICLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](templates/config.json) 为准；以下示例展示配置结构：
 
 ```jsonc
 {
@@ -184,7 +184,7 @@ pnpm start
 
 ### 一般流程
 
-1. 外部文件或图片放入${HYXCLAW_DATA_DIR}/inputs/中，或提供网址供AI读取；日常已记在 Trilium 里的内容可让 AI 搜索阅读（需启用 `tools.trilium`，只读）
+1. 外部文件或图片放入${AICLAW_DATA_DIR}/inputs/中，或提供网址供AI读取；日常已记在 Trilium 里的内容可让 AI 搜索阅读（需启用 `tools.trilium`，只读）
 2. 与AI聊天总结该文档主要内容
 3. 要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件（写入本地 `knowledge_base/`，不会改 Trilium）。
 
@@ -302,16 +302,16 @@ pnpm start
 
 ### 异地使用
 
-所有的本地数据就放置在${HYXCLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。
+所有的本地数据就放置在${AICLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。
 
 ## CLI
 
 ```bash
-hyxclaw init                    # 初始化数据目录和模板配置
-hyxclaw start                   # 启动 Web 服务
-hyxclaw start -p 8080           # 指定端口
-hyxclaw start --host 0.0.0.0    # 指定监听地址
-hyxclaw status                  # 检查配置、数据目录与启动条件
+aiclaw init                    # 初始化数据目录和模板配置
+aiclaw start                   # 启动 Web 服务
+aiclaw start -p 8080           # 指定端口
+aiclaw start --host 0.0.0.0    # 指定监听地址
+aiclaw status                  # 检查配置、数据目录与启动条件
 ```
 
 ## HTTP API
@@ -353,7 +353,7 @@ pnpm type-check       # 仅进行类型检查
 ## 数据目录
 
 ```text
-{HYXCLAW_DATA_DIR}/
+{AICLAW_DATA_DIR}/
 ├── .gitignore                         # 数据目录自身的 Git 忽略规则：排除日志、会话压缩归档和高频变化的界面状态
 ├── .installed_templates.json           # 已安装的示例模板记录；删除过的示例不会在下次 init 时重新创建
 ├── config.json                         # 应用配置：模型提供商、API Key、默认模型、文件访问范围及服务设置

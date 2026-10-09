@@ -117,7 +117,7 @@ export async function compactSession(
 1. **读取会话消息**：从 `paths.conversations/<sessionId>.jsonl` 读取所有消息。若消息数 < 2，抛出错误（无需压缩）。
 
 2. **加载压缩提示词**：
-   - 优先读取 `paths.compactionPromptFile`（`$HYXCLAW_DATA_DIR/files/prompts/compaction_prompt.txt`）
+   - 优先读取 `paths.compactionPromptFile`（`$AICLAW_DATA_DIR/files/prompts/compaction_prompt.txt`）
    - 文件不存在时，使用内置默认提示词（见下方）
 
 3. **调用 LLM 生成摘要**：

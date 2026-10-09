@@ -1,4 +1,4 @@
-# hyxClaw 开发计划
+# aiClaw 开发计划
 
 ## 开发原则
 
@@ -35,15 +35,15 @@
 实现最简单的对话功能，无记忆、无工具、无知识库
 
 ### 核心功能
-- 配置系统（`$HYXCLAW_DATA_DIR/config.json`，API Key 直接存储）
-- 用户数据目录初始化（`$HYXCLAW_DATA_DIR/`）
+- 配置系统（`$AICLAW_DATA_DIR/config.json`，API Key 直接存储）
+- 用户数据目录初始化（`$AICLAW_DATA_DIR/`）
 - 配置验证（启动时检查，错误时清晰提示）
 - LLM 提供商接口（智谱/阿里百炼/OpenRouter 任选其一）
 - LLM 调用错误处理与重试
 - 会话管理（创建、切换、列表）
-- 消息存储（JSONL 格式，存储在 `$HYXCLAW_DATA_DIR/conversations/`）
+- 消息存储（JSONL 格式，存储在 `$AICLAW_DATA_DIR/conversations/`）
 - Web 界面基础（消息收发、会话列表）
-- **文件日志**（写入 `$HYXCLAW_DATA_DIR/logs/` 目录）
+- **文件日志**（写入 `$AICLAW_DATA_DIR/logs/` 目录）
 
 ### 技术要点
 - WebSocket 通信
@@ -73,7 +73,7 @@
 - 工具定义接口（schema + handler）
 - 工具调用协议
 - 文件工具（read、write、edit）
-- 文件系统安全限制（`fs.allowedDirs`，基于 `$HYXCLAW_DATA_DIR/`）
+- 文件系统安全限制（`fs.allowedDirs`，基于 `$AICLAW_DATA_DIR/`）
 - 最大工具调用次数限制（`agent.maxToolCalls`）
 
 ### 技术要点
@@ -84,7 +84,7 @@
 ### 验收标准
 - AI 能读取文件内容
 - AI 能写入和编辑文件
-- 文件操作受 `fs.allowedDirs` 限制，默认只能访问 `$HYXCLAW_DATA_DIR/inputs/`、`$HYXCLAW_DATA_DIR/knowledge_base/`
+- 文件操作受 `fs.allowedDirs` 限制，默认只能访问 `$AICLAW_DATA_DIR/inputs/`、`$AICLAW_DATA_DIR/knowledge_base/`
 
 ### 暂不实现
 - 网络工具（web_search、web_fetch）
@@ -99,7 +99,7 @@
 添加全局记忆文件，让 AI 能跨会话记住用户信息
 
 ### 核心功能
-- 全局 `memory.md` 文件（`$HYXCLAW_DATA_DIR/memory.md`）
+- 全局 `memory.md` 文件（`$AICLAW_DATA_DIR/memory.md`）
 - 每次对话自动加载 `memory.md` 到 system prompt
 - AI 使用普通 `write`/`edit` 工具维护 `memory.md`
 
@@ -124,7 +124,7 @@ Token 使用可见，Thinking 可控
 - **Token 计数显示**：每轮对话后在 UI 显示本次调用的 input + output token 数（来自 LLM usage 字段），让用户判断是否需要压缩
   - 抽象层：`UsageRecord { model, provider, inputTokens, outputTokens, timestamp }`
   - 每次 LLM 调用后记录，通过 `chatEnd` 消息传给前端
-- **Token 累计统计持久化**：将每次调用的 usage 追加写入 `$HYXCLAW_DATA_DIR/files/usage.jsonl`，按模型/供应商分组统计
+- **Token 累计统计持久化**：将每次调用的 usage 追加写入 `$AICLAW_DATA_DIR/files/usage.jsonl`，按模型/供应商分组统计
   - 可在界面统计页面查看各模型累计消耗
 - **Thinking 开关**：UI 上可切换是否启用 thinking，切换仅影响当前会话，不持久化，刷新页面后恢复 config.json 默认值
   - `enableThinking` 已在 `AgentConfig` 中，前端通过 `GET /api/config` 读取默认值
@@ -146,7 +146,7 @@ Token 使用可见，Thinking 可控
   - 原始 `.jsonl` 归档到 `conversation_archive/<sessionId>_<timestamp>.jsonl`
   - 新会话文件 = 仅一条摘要消息（`user` + `assistant` 对，user 说"请回顾之前的对话"，assistant 回复摘要内容）
   - 压缩模型可独立配置（`compaction.model`）
-  - 压缩提示词：`$HYXCLAW_DATA_DIR/files/prompts/compaction_prompt.txt`，不存在时使用内置默认值
+  - 压缩提示词：`$AICLAW_DATA_DIR/files/prompts/compaction_prompt.txt`，不存在时使用内置默认值
 
 ### 验收标准
 - 点击压缩按钮后，原始文件归档，会话文件替换为压缩版本

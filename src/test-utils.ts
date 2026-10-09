@@ -1,5 +1,5 @@
 /**
- * Test utilities for hyxClaw
+ * Test utilities for aiClaw
  */
 
 import { rm, mkdir } from "node:fs/promises";
@@ -16,7 +16,7 @@ export async function setupTestDir(testName: string): Promise<string> {
   const testDir = path.join(process.cwd(), ".test-data", testName);
 
   // Set environment variable for this test
-  process.env.HYXCLAW_DATA_DIR = testDir;
+  process.env.AICLAW_DATA_DIR = testDir;
 
   // Clean up test directory
   await rm(testDir, { recursive: true, force: true });

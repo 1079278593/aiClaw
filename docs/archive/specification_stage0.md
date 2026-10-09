@@ -18,7 +18,7 @@
 
 ### 3. 目录结构
 ```
-hyxClaw/
+aiClaw/
 ├── src/              # 源代码
 ├── test/             # 测试文件
 ├── docs/             # 文档

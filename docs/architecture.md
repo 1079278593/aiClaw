@@ -1,4 +1,4 @@
-# hyxClaw - Technical Architecture
+# aiClaw - Technical Architecture
 
 ## 1. Tech Stack
 
@@ -89,7 +89,7 @@ src/
 ├── logger/               # Logging (tslog wrapper)
 │   └── index.ts          # Logger class, getLogger(), module-level logger proxy
 ├── errors/               # Error classes
-│   ├── index.ts          # HyxClawError, ConfigError, LLMError, FileSystemError, ToolError
+│   ├── index.ts          # AiClawError, ConfigError, LLMError, FileSystemError, ToolError
 │   └── handler.ts        # ErrorHandler, withErrorHandling() wrappers
 ├── types/                # Shared TypeScript types
 │   └── index.ts          # Message, Session, MessageRole, re-exports from config/llm
@@ -98,10 +98,10 @@ src/
 └── index.ts              # Entry point → forwards to CLI
 ```
 
-### 2.2 User Data Directory (`$HYXCLAW_DATA_DIR`)
+### 2.2 User Data Directory (`$AICLAW_DATA_DIR`)
 
 ```
-$HYXCLAW_DATA_DIR/
+$AICLAW_DATA_DIR/
 ├── config.json                          # Main configuration
 ├── conversations/                       # Session history (JSONL)
 │   ├── <sessionId>.jsonl
@@ -130,9 +130,9 @@ $HYXCLAW_DATA_DIR/
 ## 3. Module Responsibilities
 
 ### 3.1 CLI (`src/cli/`)
-- `hyxclaw start` — Start web server
-- `hyxclaw init` — Initialize the data directory and templates
-- `hyxclaw status` — Check configuration, data directory and startup readiness
+- `aiclaw start` — Start web server
+- `aiclaw init` — Initialize the data directory and templates
+- `aiclaw status` — Check configuration, data directory and startup readiness
 
 ### 3.2 Server (`src/server/`)
 - **HTTP**: plain `node:http` server, no framework (no Express/Hono at runtime).
@@ -207,7 +207,7 @@ Server → Client:
 
 ### 3.5 Tools (`src/tools/`)
 - **Registry**: module-level `tools[]` array, `registerTool()`, `getTools()`, `initTools()` clears then re-registers
-- **Built-in tools**: `list`, `read`, `write`, `edit`, `grep`, `move`, `delete` — file operations under `$HYXCLAW_DATA_DIR/`. `read` handles both text and images: a text file returns its content (optional `offset`/`limit` line slicing; capped at 2000 lines / 50 KiB by default, soft-truncated with a notice on overflow), while an allowlisted PNG/JPEG/GIF/WebP file is returned as a multimodal tool result. The image branch is gated on the active model's vision support (`context.supportsImages`); non-vision models get a text error instead of the bytes.
+- **Built-in tools**: `list`, `read`, `write`, `edit`, `grep`, `move`, `delete` — file operations under `$AICLAW_DATA_DIR/`. `read` handles both text and images: a text file returns its content (optional `offset`/`limit` line slicing; capped at 2000 lines / 50 KiB by default, soft-truncated with a notice on overflow), while an allowlisted PNG/JPEG/GIF/WebP file is returned as a multimodal tool result. The image branch is gated on the active model's vision support (`context.supportsImages`); non-vision models get a text error instead of the bytes.
 - **Optional Tavily tools** (`tools.tavily.enabled` + apiKey): `web_search`, `web_fetch`
 - **Optional Trilium tools** (`tools.trilium.enabled` + token): `trilium_search`, `trilium_list`, `trilium_read` — read-only ETAPI access via `src/trilium/`. Writes still go to local `knowledge_base/`. Note refs use `trilium:{noteId}`.
 - **Path sandboxing** (`fs-policy.ts`): `resolveAllowedDirs()` resolves relative paths against data dir, `assertPathAllowed()` enforces whitelist
@@ -230,7 +230,7 @@ Server → Client:
 - **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `maxToolCalls`, `server` (port/host), `fs` (allowedDirs/allowedFiles), `tools` (tavily, trilium), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
 - **Supported providers**: `zai` (智谱), `dashscope` (阿里百炼)
 - **Thinking levels**: the UI always adds `none`; each model's `thinking` list supplies provider-native values (for example, DeepSeek `high` / `max`). `none` is sent explicitly as that provider's disable parameter.
-- **`$HYXCLAW_DATA_DIR`** must be set via `.env` file, no default fallback
+- **`$AICLAW_DATA_DIR`** must be set via `.env` file, no default fallback
 
 ---
 
@@ -380,13 +380,13 @@ The browser UI uses native ES modules without a frontend framework or bundler. `
 ## 7. Security
 
 ### 7.1 File System Sandbox
-- All file tool paths resolved relative to `$HYXCLAW_DATA_DIR/`
+- All file tool paths resolved relative to `$AICLAW_DATA_DIR/`
 - `assertPathAllowed()` checks resolved path is within `fs.allowedDirs` or matches `fs.allowedFiles`
 - Default: `inputs/`, `knowledge_base/`, `files/`
 
 ### 7.2 API Keys
 - Stored in `config.json`, loaded by server at startup
-- Never logged; `hyxclaw status` only reports whether an API key is set
+- Never logged; `aiclaw status` only reports whether an API key is set
 
 ### 7.3 Network
 - Server binds `127.0.0.1` by default (localhost only)

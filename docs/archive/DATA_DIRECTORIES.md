@@ -2,9 +2,9 @@
 
 ## 概述
 
-hyxClaw 使用独立的数据目录存储所有用户数据，与项目代码分离。
+aiClaw 使用独立的数据目录存储所有用户数据，与项目代码分离。
 
-**重要**：现在必须通过 `.env` 文件配置 `HYXCLAW_DATA_DIR`，没有硬编码的默认值。
+**重要**：现在必须通过 `.env` 文件配置 `AICLAW_DATA_DIR`，没有硬编码的默认值。
 
 ## 目录位置
 
@@ -14,17 +14,17 @@ hyxClaw 使用独立的数据目录存储所有用户数据，与项目代码分
 
 ```bash
 # .env
-HYXCLAW_DATA_DIR=C:\Virtual_D\hyxClaw
+AICLAW_DATA_DIR=C:\Virtual_D\aiClaw
 ```
 
 **Windows 推荐路径:**
 ```
-C:\Virtual_D\hyxClaw\
+C:\Virtual_D\aiClaw\
 ```
 
 **Linux/macOS 推荐路径:**
 ```
-~/.hyxclaw/
+~/.aiclaw/
 ```
 
 ### 测试环境
@@ -44,10 +44,10 @@ C:\Virtual_D\hyxClaw\
 ## 目录结构
 
 ```
-C:\Virtual_D\hyxClaw\
+C:\Virtual_D\aiClaw\
 ├── config.json          # 配置文件
 ├── logs/                # 日志文件
-│   └── hyxclaw-YYYY-MM-DD.log
+│   └── aiclaw-YYYY-MM-DD.log
 ├── conversations/       # 会话数据
 │   └── {sessionId}.json
 ├── memory/              # 记忆文件
@@ -72,7 +72,7 @@ C:\Virtual_D\hyxClaw\
 
 ```bash
 # .env
-HYXCLAW_DATA_DIR=C:\Virtual_D\hyxClaw
+AICLAW_DATA_DIR=C:\Virtual_D\aiClaw
 ```
 
 为什么使用 `.env` 文件：
@@ -87,7 +87,7 @@ HYXCLAW_DATA_DIR=C:\Virtual_D\hyxClaw
 
 ```typescript
 // vitest.config.ts
-process.env.HYXCLAW_DATA_DIR = path.join(process.cwd(), ".test-data");
+process.env.AICLAW_DATA_DIR = path.join(process.cwd(), ".test-data");
 ```
 
 测试代码中使用：
@@ -108,8 +108,8 @@ await initConfig(testDataDir);
 ### 目录结构
 
 ```
-hyxClaw/
-├── .env                    # 正式环境配置（指向 C:\Virtual_D\hyxClaw）
+aiClaw/
+├── .env                    # 正式环境配置（指向 C:\Virtual_D\aiClaw）
 ├── .test-data/             # 测试数据目录（自动创建，gitignore）
 │   ├── config.json         # 测试环境配置
 │   ├── logs/
@@ -122,7 +122,7 @@ hyxClaw/
 ### 工作流程
 
 1. **日常开发**：
-   - `.env` 配置指向正式数据目录（如 `C:\Virtual_D\hyxClaw`）
+   - `.env` 配置指向正式数据目录（如 `C:\Virtual_D\aiClaw`）
    - 运行服务使用正式数据
 
 2. **运行测试**：
@@ -154,7 +154,7 @@ pnpm test:config clean
 **方法 2：手动复制**
 ```bash
 # 复制正式配置到测试环境
-cp C:\Virtual_D\hyxClaw\config.json .test-data/global-test/config.json
+cp C:\Virtual_D\aiClaw\config.json .test-data/global-test/config.json
 ```
 
 **方法 3：复制示例配置**
@@ -174,12 +174,12 @@ cp .test-data.config.example.json .test-data/global-test/config.json
 项目根目录的 `.env` 文件（**必需**）：
 
 ```bash
-# hyxClaw 环境变量配置
+# aiClaw 环境变量配置
 
 # 用户数据目录（必需）
-# Windows 示例: HYXCLAW_DATA_DIR=D:\MyData\hyxclaw
-# Linux/macOS 示例: HYXCLAW_DATA_DIR=/home/user/.hyxclaw
-HYXCLAW_DATA_DIR=C:\Virtual_D\hyxClaw
+# Windows 示例: AICLAW_DATA_DIR=D:\MyData\aiclaw
+# Linux/macOS 示例: AICLAW_DATA_DIR=/home/user/.aiclaw
+AICLAW_DATA_DIR=C:\Virtual_D\aiClaw
 ```
 
 参考 `.env.example` 文件可以查看所有可配置的环境变量。
@@ -201,7 +201,7 @@ rm .test-data/config.json
 如果需要迁移数据到新位置：
 
 1. 停止服务
-2. 复制整个 `C:\Virtual_D\hyxClaw\` 到新位置
-3. 修改 `.env` 文件，设置 `HYXCLAW_DATA_DIR` 指向新位置
+2. 复制整个 `C:\Virtual_D\aiClaw\` 到新位置
+3. 修改 `.env` 文件，设置 `AICLAW_DATA_DIR` 指向新位置
 4. 启动服务验证
 5. 确认无问题后删除旧数据

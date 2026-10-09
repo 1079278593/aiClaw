@@ -6,13 +6,13 @@
 ## 功能清单
 
 ### 1. 配置系统
-- [x] 配置文件读取 (`C:\Virtual_D\hyxClaw/config.json`)
+- [x] 配置文件读取 (`C:\Virtual_D\aiClaw/config.json`)
 - [x] API Key 直接存储在 config.json 中
 - [x] 配置验证（启动时检查）
 - [x] 默认配置生成
 
 ### 2. 用户数据目录初始化
-- [x] 检查并创建 `C:\Virtual_D\hyxClaw/` 目录
+- [x] 检查并创建 `C:\Virtual_D\aiClaw/` 目录
 - [x] 创建子目录：`logs/`, `conversations/`, `memory/`, `knowledge/`, `files/`, `database/`
 - [x] 生成默认配置文件（如果不存在）
 
@@ -40,7 +40,7 @@
 - [x] WebSocket 通信
 
 ### 7. 文件日志
-- [x] 日志写入 `C:\Virtual_D\hyxClaw/logs/` 目录
+- [x] 日志写入 `C:\Virtual_D\aiClaw/logs/` 目录
 - [x] 按日期轮转
 
 ### 8. 上下文控制

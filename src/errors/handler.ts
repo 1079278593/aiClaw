@@ -3,7 +3,7 @@
  */
 
 import type { Logger } from "../logger/index.js";
-import { isHyxClawError, isError, type HyxClawError } from "./index.js";
+import { isAiClawError, isError, type AiClawError } from "./index.js";
 
 export interface ErrorHandlerOptions {
   logger?: Logger;
@@ -22,8 +22,8 @@ export class ErrorHandler {
   public handle(error: unknown, context?: string): void {
     const ctx = context ? `[${context}] ` : "";
 
-    if (isHyxClawError(error)) {
-      this.handleHyxClawError(error, ctx);
+    if (isAiClawError(error)) {
+      this.handleAiClawError(error, ctx);
     } else if (isError(error)) {
       this.handleGenericError(error, ctx);
     } else {
@@ -35,7 +35,7 @@ export class ErrorHandler {
     }
   }
 
-  private handleHyxClawError(error: HyxClawError, ctx: string): void {
+  private handleAiClawError(error: AiClawError, ctx: string): void {
     const logData = {
       code: error.code,
       details: error.details,

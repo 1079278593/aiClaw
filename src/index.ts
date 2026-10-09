@@ -1,5 +1,5 @@
 /**
- * hyxClaw - Main entry point
+ * aiClaw - Main entry point
  *
  * Forwards to CLI for command processing
  */

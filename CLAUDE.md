@@ -1,4 +1,4 @@
-# hyxClaw - 个人本地知识库AI助手
+# aiClaw - 个人本地知识库AI助手
 
 ## 项目信息
 - **平台**：Windows 11 —— 使用 Windows 路径（反斜杠），而非 `/mnt/c/...`

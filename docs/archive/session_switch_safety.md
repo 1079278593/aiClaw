@@ -101,7 +101,7 @@ WebSocket 连接上的 `client.sessionId` 表示该连接当前订阅哪个会�
 
 如果会话 A 正在后台生成，用户切到 B 后再切回 A，前端会重新 `joinSession(A)`。
 
-后端会从 `$HYXCLAW_DATA_DIR/conversations/<sessionId>.jsonl` 读取 A 的最新历史，并通过 `sessionLoaded` 返回给前端。
+后端会从 `$AICLAW_DATA_DIR/conversations/<sessionId>.jsonl` 读取 A 的最新历史，并通过 `sessionLoaded` 返回给前端。
 
 因此，后台生成完成后的结果可以在切回会话时看到，但不会在用户停留于其他会话时实时显示。
 
@@ -172,7 +172,7 @@ WebSocket 连接上的 `client.sessionId` 表示该连接当前订阅哪个会�
 生成过程中，后端会把正式进入会话历史的消息写入：
 
 ```text
-$HYXCLAW_DATA_DIR/conversations/<sessionId>.jsonl
+$AICLAW_DATA_DIR/conversations/<sessionId>.jsonl
 ```
 
 因此，即使前端切走、刷新或重新进入会话，只要后端已经完成落盘，历史记录仍可以通过 `sessionLoaded` 重新加载。

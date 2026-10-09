@@ -16,7 +16,7 @@
 
 ### 2. 文件系统安全
 - [x] 路径安全校验（基于 `fs.allowedDirs` 配置）
-- [x] 支持相对路径（相对于用户数据目录 `C:\Virtual_D\hyxClaw\`）
+- [x] 支持相对路径（相对于用户数据目录 `C:\Virtual_D\aiClaw\`）
 - [x] 支持绝对路径（需在 allowedDirs 范围内）
 - [x] 路径穿越攻击防护（拒绝 `../` 等越界路径）
 - [x] 默认允许目录：`files`、`memory`、`knowledge`

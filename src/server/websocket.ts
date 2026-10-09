@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import { BRAND_NAME } from "../brand.js";
 import type { Config } from "../config/index.js";
 import type { getLogger } from "../logger/index.js";
 import { setLastActiveSession } from "../app-state/index.js";
@@ -17,7 +18,7 @@ export function handleWebSocketConnection(
   const pendingPermissions = new Map<string, { resolve: (allowed: boolean) => void; sessionId: string }>();
   clients.set(ws, client);
   logger.info(`WebSocket client connected (${clients.size} total)`);
-  sendToClient(client, { type: "connected", message: "Connected to hyxClaw" });
+  sendToClient(client, { type: "connected", message: `Connected to ${BRAND_NAME}` });
 
   ws.on("message", async (data: Buffer) => {
     try {

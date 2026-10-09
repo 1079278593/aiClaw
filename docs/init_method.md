@@ -3,12 +3,12 @@
 **入口**: `src/config/index.ts` - `initConfig(userDataDir?)`
 
 - 由 CLI 命令 `start` 和 `init` 调用。
-- 幂等：每次调用都会将 `templates/` 目录同步到 `$HYXCLAW_DATA_DIR`。
+- 幂等：每次调用都会将 `templates/` 目录同步到 `$AICLAW_DATA_DIR`。
 - **按文件策略**：每个模板文件的更新策略在代码中定义（`src/config/init-strategies.ts`），`templates/` 目录保持纯粹，只放模板文件。
 
 **流程**：
 
-1. `ensureDirectories(paths)` 在 `$HYXCLAW_DATA_DIR` 下创建所需目录。
+1. `ensureDirectories(paths)` 在 `$AICLAW_DATA_DIR` 下创建所需目录。
 2. 加载 `src/config/init-strategies.ts` 中定义的策略映射。
 3. 对每个模板文件，按声明的策略执行：
    - `once` — 仅在目标文件不存在时复制。若配置了 `trackInstalled`，则首次复制后记录，之后即使文件被删除也不再恢复。
@@ -64,7 +64,7 @@ export const FILE_STRATEGIES: Record<string, StrategyEntry> = {
 
 **`trackInstalled` 选项**：
 - 仅对 `once` 策略生效。
-- 首次复制后，文件路径写入 `$HYXCLAW_DATA_DIR/.installed_templates.json`。
+- 首次复制后，文件路径写入 `$AICLAW_DATA_DIR/.installed_templates.json`。
 - 后续 init 时，若文件在已安装记录中，即使目标路径不存在也不恢复。
 - 适用场景：示例文件——新用户能看到，老用户删除后不会复活。
 
@@ -93,6 +93,6 @@ templates/
       `- 寄生机器的悖论.md
 ```
 
-同步后，`$HYXCLAW_DATA_DIR` 下存在相同的相对路径结构。
+同步后，`$AICLAW_DATA_DIR` 下存在相同的相对路径结构。
 
 **Paths**: `src/config/paths.ts` - `getPaths(userDataDir?)` 返回所有路径常量；`ensureDirectories(paths)` 创建所需目录。

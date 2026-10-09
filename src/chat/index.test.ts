@@ -78,7 +78,7 @@ describe("chat", () => {
 
   beforeEach(async () => {
     testDir = path.join(process.cwd(), ".test-data", `chat-test-${randomBytes(8).toString("hex")}`);
-    process.env.HYXCLAW_DATA_DIR = testDir;
+    process.env.AICLAW_DATA_DIR = testDir;
     await mkdir(path.join(testDir, "files", "prompts"), { recursive: true });
     session = await createSession("Test Chat", testDir);
   });

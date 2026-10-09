@@ -7,4 +7,4 @@ import path from "node:path";
 
 // Set a default test data directory for all tests
 // Individual test files can override this by calling setupTestDir()
-process.env.HYXCLAW_DATA_DIR = path.join(process.cwd(), ".test-data", "global-test");
+process.env.AICLAW_DATA_DIR = path.join(process.cwd(), ".test-data", "global-test");

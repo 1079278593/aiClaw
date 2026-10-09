@@ -3,9 +3,9 @@ setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 
-title hyxClaw
+title aiClaw
 echo ========================================
-echo   hyxClaw
+echo   aiClaw
 echo ========================================
 echo.
 
@@ -24,7 +24,7 @@ if errorlevel 1 (
 if not exist ".env" (
   echo [错误] 未找到 .env 文件。
   echo 请在本目录创建 .env，并设置数据目录，例如：
-  echo   HYXCLAW_DATA_DIR=D:\MyData
+  echo   AICLAW_DATA_DIR=D:\MyData
   echo 可参考 .env.example。
   echo.
   pause
