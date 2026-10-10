@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
@@ -8,6 +9,59 @@ import 'document_browser.dart';
 import 'document_reader.dart';
 import 'more_page.dart';
 import 'session_list_page.dart';
+
+const _handleWidth = 16.0;
+const _minDocWidth = 140.0;
+const _maxDocWidth = 480.0;
+const _minChatWidth = 200.0;
+const _maxChatWidth = 640.0;
+const _minReaderWidth = 240.0;
+const _minSideWidth = 160.0;
+
+class _ColumnHandle extends StatelessWidget {
+  const _ColumnHandle({required this.onDrag, required this.onDragEnd});
+
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Theme.of(context).colorScheme.outlineVariant;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
+      onHorizontalDragEnd: (_) => onDragEnd(),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        child: SizedBox(
+          width: _handleWidth,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: (_handleWidth - 1) / 2,
+                width: 1,
+                child: ColoredBox(color: line),
+              ),
+              Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: line),
+                  ),
+                  child: const SizedBox(width: 10, height: 36),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, required this.controller});
@@ -20,11 +74,34 @@ class ShellPage extends StatefulWidget {
 class _ShellPageState extends State<ShellPage> {
   var _tab = 0;
   var _sidebar = 0;
+  double _docWidth = 280;
+  double _chatWidth = 420;
+  double _sideWidth = 300;
 
   @override
   void initState() {
     super.initState();
     _restore();
+    _loadWidths();
+  }
+
+  Future<void> _loadWidths() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _docWidth = prefs.getDouble('ipad-doc-width') ?? _docWidth;
+        _chatWidth = prefs.getDouble('ipad-chat-width') ?? _chatWidth;
+        _sideWidth = prefs.getDouble('ipad-side-width') ?? _sideWidth;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveWidths() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ipad-doc-width', _docWidth);
+    await prefs.setDouble('ipad-chat-width', _chatWidth);
+    await prefs.setDouble('ipad-side-width', _sideWidth);
   }
 
   Future<void> _restore() async {
@@ -73,11 +150,28 @@ class _ShellPageState extends State<ShellPage> {
   Widget _portrait() {
     return Scaffold(
       body: SafeArea(
-        child: Row(
-          children: [
-            SizedBox(
-              width: 300,
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final side = _sideWidth.clamp(_minSideWidth, (constraints.maxWidth * 0.5).clamp(_minSideWidth, 460.0)).toDouble();
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: side, child: _portraitSidebar()),
+                _ColumnHandle(
+                  onDrag: (dx) => setState(() => _sideWidth = side + dx),
+                  onDragEnd: _saveWidths,
+                ),
+                Expanded(child: _sidebar == 0 ? _chatOrEmpty() : DocumentReaderPage(controller: widget.controller, embedded: true)),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _portraitSidebar() {
+    return Column(
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(12),
@@ -99,27 +193,38 @@ class _ShellPageState extends State<ShellPage> {
                     )),
                   ),
                 ],
-              ),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(child: _sidebar == 0 ? _chatOrEmpty() : DocumentReaderPage(controller: widget.controller, embedded: true)),
-          ],
-        ),
-      ),
     );
   }
 
   Widget _wide() {
     return Scaffold(
       body: SafeArea(
-        child: Row(
-          children: [
-            SizedBox(width: 280, child: _docSidebar(footer: true)),
-            const VerticalDivider(width: 1),
-            Expanded(child: DocumentReaderPage(controller: widget.controller, embedded: true)),
-            const VerticalDivider(width: 1),
-            SizedBox(width: 420, child: _chatOrEmpty(showHistory: true)),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            const handle = _handleWidth;
+            const minMiddle = _minReaderWidth;
+            final total = constraints.maxWidth;
+            final maxDoc = (total - _minChatWidth - handle * 2 - minMiddle).clamp(_minDocWidth, _maxDocWidth).toDouble();
+            final doc = _docWidth.clamp(_minDocWidth, maxDoc).toDouble();
+            final maxChat = (total - doc - handle * 2 - minMiddle).clamp(_minChatWidth, _maxChatWidth).toDouble();
+            final chat = _chatWidth.clamp(_minChatWidth, maxChat).toDouble();
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: doc, child: _docSidebar(footer: true)),
+                _ColumnHandle(
+                  onDrag: (dx) => setState(() => _docWidth = doc + dx),
+                  onDragEnd: _saveWidths,
+                ),
+                Expanded(child: DocumentReaderPage(controller: widget.controller, embedded: true)),
+                _ColumnHandle(
+                  onDrag: (dx) => setState(() => _chatWidth = chat - dx),
+                  onDragEnd: _saveWidths,
+                ),
+                SizedBox(width: chat, child: _chatOrEmpty(showHistory: true)),
+              ],
+            );
+          },
         ),
       ),
     );

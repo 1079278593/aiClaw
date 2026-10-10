@@ -39,11 +39,20 @@ ThemeData aiTheme(AppController controller) {
       ),
   };
   final family = controller.serif ? 'Georgia' : null;
-  final factor = controller.fontSize / 16;
-  final base = ThemeData(colorScheme: scheme, useMaterial3: true, fontFamily: family);
-  return base.copyWith(
-    textTheme: base.textTheme.apply(fontSizeFactor: factor, bodyColor: scheme.onSurface),
+  return ThemeData(
+    colorScheme: scheme,
+    useMaterial3: true,
+    fontFamily: family,
     scaffoldBackgroundColor: scheme.surface,
+  );
+}
+
+Widget applyFontSize(BuildContext context, AppController controller, Widget? child) {
+  final media = MediaQuery.of(context);
+  final system = media.textScaler.scale(16) / 16;
+  return MediaQuery(
+    data: media.copyWith(textScaler: TextScaler.linear(system * controller.fontSize / 16)),
+    child: child ?? const SizedBox.shrink(),
   );
 }
 

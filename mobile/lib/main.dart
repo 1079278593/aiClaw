@@ -79,6 +79,7 @@ class _AiClawAppState extends State<AiClawApp> {
       navigatorKey: navigatorKey,
       title: 'aiClaw',
       theme: aiTheme(widget.controller),
+      builder: (context, child) => applyFontSize(context, widget.controller, child),
       home: _rootPage(),
     );
   }
