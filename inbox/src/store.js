@@ -1,12 +1,51 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NotFoundError, InboxPathError } from "./errors.js";
+import { newMessageId } from "./ids.js";
 import { getChatsRoot, resolveThreadDir, sanitizeThreadId, timestampSlug } from "./paths.js";
 
-const THREAD_META = "_thread.json";
+/**
+ * Long-term chat storage (v1)
+ *
+ * inputs/chats/<threadId>/
+ *   meta.json          — thread metadata + schemaVersion
+ *   messages.jsonl     — append-only source of truth (one JSON object per line)
+ *   media/             — binary attachments referenced by relative path
+ *   transcript.md      — derived, human-readable mirror (append-synced)
+ *
+ * Do NOT store one markdown file per utterance — that does not scale.
+ */
+
+const SCHEMA_VERSION = 1;
+const META_FILE = "meta.json";
+const LEGACY_META = "_thread.json";
+const MESSAGES_FILE = "messages.jsonl";
+const TRANSCRIPT_FILE = "transcript.md";
+const MEDIA_DIR = "media";
 
 /**
- * @typedef {{ title: string, members: string[], kind: "dm" | "group", createdAt?: string, updatedAt?: string }} ThreadMeta
+ * @typedef {{
+ *   schemaVersion: number,
+ *   id: string,
+ *   title: string,
+ *   members: string[],
+ *   kind: "dm" | "group",
+ *   createdAt: string,
+ *   updatedAt: string,
+ *   messageCount: number,
+ * }} ThreadMeta
+ */
+
+/**
+ * @typedef {{
+ *   v: number,
+ *   id: string,
+ *   ts: string,
+ *   speaker: string,
+ *   type: "text" | "image",
+ *   text?: string,
+ *   media?: { path: string, mime: string, bytes: number, originalName?: string },
+ * }} ChatMessage
  */
 
 export class ChatStore {
@@ -27,70 +66,145 @@ export class ChatStore {
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
       try {
-        const meta = await this.readMeta(entry.name);
-        threads.push({ id: entry.name, ...meta });
+        const meta = await this.ensureMeta(entry.name);
+        threads.push(publicMeta(meta));
       } catch {
-        threads.push({
-          id: entry.name,
-          title: entry.name,
-          members: ["我"],
-          kind: "dm",
-        });
+        // skip unreadable dirs
       }
     }
     threads.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
     return threads;
   }
 
-  async readMeta(threadId) {
-    const { dir } = resolveThreadDir(this.chatsRoot, threadId);
-    const raw = await fs.readFile(path.join(dir, THREAD_META), "utf-8");
-    return JSON.parse(raw);
-  }
-
-  async writeMeta(threadId, meta) {
-    const { id, dir } = resolveThreadDir(this.chatsRoot, threadId);
-    await fs.mkdir(dir, { recursive: true });
-    const payload = {
-      title: meta.title || id,
-      members: normalizeMembers(meta.members),
-      kind: meta.kind === "group" ? "group" : "dm",
-      createdAt: meta.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await fs.writeFile(path.join(dir, THREAD_META), JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    return { id, ...payload };
-  }
-
   async createThread({ title, members, kind }) {
     const id = sanitizeThreadId(title);
     const { dir } = resolveThreadDir(this.chatsRoot, id);
+    await fs.mkdir(dir, { recursive: true });
     try {
-      await fs.access(path.join(dir, THREAD_META));
+      await fs.access(path.join(dir, META_FILE));
       throw new InboxPathError(`会话已存在：${id}`);
     } catch (err) {
       if (err instanceof InboxPathError) throw err;
     }
-    const memberList = normalizeMembers(members?.length ? members : kind === "group" ? ["我"] : ["我", id]);
-    return this.writeMeta(id, {
+    try {
+      await fs.access(path.join(dir, LEGACY_META));
+      throw new InboxPathError(`会话已存在：${id}`);
+    } catch (err) {
+      if (err instanceof InboxPathError) throw err;
+    }
+
+    const now = new Date().toISOString();
+    const memberList = normalizeMembers(
+      members?.length ? members : kind === "group" ? ["我"] : ["我", id],
+    );
+    const meta = /** @type {ThreadMeta} */ ({
+      schemaVersion: SCHEMA_VERSION,
+      id,
       title: id,
       members: memberList,
       kind: kind === "group" ? "group" : "dm",
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      messageCount: 0,
     });
+    await this.writeMeta(dir, meta);
+    await fs.writeFile(path.join(dir, MESSAGES_FILE), "", "utf-8");
+    await fs.writeFile(
+      path.join(dir, TRANSCRIPT_FILE),
+      transcriptHeader(meta),
+      "utf-8",
+    );
+    await fs.mkdir(path.join(dir, MEDIA_DIR), { recursive: true });
+    return publicMeta(meta);
   }
 
   async updateThread(threadId, patch) {
-    const existing = await this.readMeta(threadId).catch(() => {
-      throw new NotFoundError(`会话不存在：${threadId}`);
-    });
-    return this.writeMeta(threadId, {
-      ...existing,
-      title: patch.title ?? existing.title,
-      members: patch.members ?? existing.members,
-      kind: patch.kind ?? existing.kind,
-      createdAt: existing.createdAt,
-    });
+    const { meta, dir } = await this.assertThread(threadId);
+    const next = {
+      ...meta,
+      title: patch.title ?? meta.title,
+      members: patch.members ? normalizeMembers(patch.members) : meta.members,
+      kind: patch.kind === "group" || patch.kind === "dm" ? patch.kind : meta.kind,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.writeMeta(dir, next);
+    return publicMeta(next);
+  }
+
+  async addTextEntry({ thread, speaker, text }) {
+    const body = String(text ?? "").trim();
+    if (!body) throw new InboxPathError("正文不能为空");
+    const who = requireSpeaker(speaker);
+    const { id, dir, meta } = await this.assertThread(thread);
+    await this.ensureSpeaker(dir, meta, who);
+
+    /** @type {ChatMessage} */
+    const message = {
+      v: SCHEMA_VERSION,
+      id: newMessageId(),
+      ts: new Date().toISOString(),
+      speaker: who,
+      type: "text",
+      text: body,
+    };
+    await this.appendMessage(dir, meta, message);
+    return {
+      thread: id,
+      message,
+      path: `inputs/chats/${id}/${MESSAGES_FILE}`,
+    };
+  }
+
+  async addImageEntry({ thread, speaker, buffer, originalName, mimeType }) {
+    const who = requireSpeaker(speaker);
+    if (!buffer?.length) throw new InboxPathError("缺少图片文件");
+    const { id, dir, meta } = await this.assertThread(thread);
+    await this.ensureSpeaker(dir, meta, who);
+
+    const ext = extFromUpload(originalName, mimeType);
+    const mediaName = `${timestampSlug()}_${newMessageId().slice(-8)}${ext}`;
+    const relMedia = `${MEDIA_DIR}/${mediaName}`;
+    await fs.mkdir(path.join(dir, MEDIA_DIR), { recursive: true });
+    await fs.writeFile(path.join(dir, relMedia), buffer);
+
+    /** @type {ChatMessage} */
+    const message = {
+      v: SCHEMA_VERSION,
+      id: newMessageId(),
+      ts: new Date().toISOString(),
+      speaker: who,
+      type: "image",
+      text: originalName ? String(originalName) : undefined,
+      media: {
+        path: relMedia,
+        mime: mimeType || "application/octet-stream",
+        bytes: buffer.length,
+        originalName: originalName || undefined,
+      },
+    };
+    await this.appendMessage(dir, meta, message);
+    return {
+      thread: id,
+      message,
+      path: `inputs/chats/${id}/${relMedia}`,
+    };
+  }
+
+  /** Recent messages, newest last (chronological). */
+  async listMessages(threadId, { limit = 100 } = {}) {
+    const { id, dir } = await this.assertThread(threadId);
+    const raw = await fs.readFile(path.join(dir, MESSAGES_FILE), "utf-8").catch(() => "");
+    const lines = raw.split("\n").filter((l) => l.trim());
+    const sliced = limit > 0 ? lines.slice(-limit) : lines;
+    const messages = [];
+    for (const line of sliced) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        // skip corrupt line
+      }
+    }
+    return { thread: id, messages };
   }
 
   async assertThread(threadId) {
@@ -100,72 +214,105 @@ export class ChatStore {
     } catch {
       throw new NotFoundError(`会话不存在：${id}`);
     }
-    let meta;
-    try {
-      meta = await this.readMeta(id);
-    } catch {
-      meta = { title: id, members: ["我", id], kind: "dm" };
-      await this.writeMeta(id, meta);
-      meta = await this.readMeta(id);
-    }
+    const meta = await this.ensureMeta(id);
     return { id, dir, meta };
   }
 
-  async addTextEntry({ thread, speaker, text }) {
-    const body = String(text ?? "").trim();
-    if (!body) throw new InboxPathError("正文不能为空");
-    const { id, dir, meta } = await this.assertThread(thread);
-    const who = String(speaker ?? "").trim();
-    if (!who) throw new InboxPathError("说话人不能为空");
-    if (!meta.members.includes(who)) {
-      meta.members = normalizeMembers([...meta.members, who]);
-      await this.writeMeta(id, meta);
+  async ensureMeta(threadId) {
+    const { id, dir } = resolveThreadDir(this.chatsRoot, threadId);
+    const metaPath = path.join(dir, META_FILE);
+    try {
+      const raw = await fs.readFile(metaPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      return normalizeMeta(id, parsed);
+    } catch {
+      // legacy _thread.json
+      try {
+        const legacy = JSON.parse(await fs.readFile(path.join(dir, LEGACY_META), "utf-8"));
+        const meta = normalizeMeta(id, legacy);
+        await this.writeMeta(dir, meta);
+        await fs.mkdir(path.join(dir, MEDIA_DIR), { recursive: true });
+        try {
+          await fs.access(path.join(dir, MESSAGES_FILE));
+        } catch {
+          await fs.writeFile(path.join(dir, MESSAGES_FILE), "", "utf-8");
+        }
+        try {
+          await fs.access(path.join(dir, TRANSCRIPT_FILE));
+        } catch {
+          await fs.writeFile(path.join(dir, TRANSCRIPT_FILE), transcriptHeader(meta), "utf-8");
+        }
+        return meta;
+      } catch {
+        const now = new Date().toISOString();
+        const meta = normalizeMeta(id, {
+          title: id,
+          members: ["我", id],
+          kind: "dm",
+          createdAt: now,
+          updatedAt: now,
+          messageCount: 0,
+        });
+        await this.writeMeta(dir, meta);
+        await fs.mkdir(path.join(dir, MEDIA_DIR), { recursive: true });
+        await fs.writeFile(path.join(dir, MESSAGES_FILE), "", "utf-8");
+        await fs.writeFile(path.join(dir, TRANSCRIPT_FILE), transcriptHeader(meta), "utf-8");
+        return meta;
+      }
     }
-    const stamp = timestampSlug();
-    const fileName = `${stamp}.md`;
-    const content =
-      `---\n` +
-      `speaker: ${yamlEscape(who)}\n` +
-      `time: ${new Date().toISOString()}\n` +
-      `thread: ${yamlEscape(id)}\n` +
-      `---\n\n` +
-      `${body}\n`;
-    const filePath = path.join(dir, fileName);
-    await fs.writeFile(filePath, content, "utf-8");
-    return { thread: id, speaker: who, path: `inputs/chats/${id}/${fileName}`, fileName };
   }
 
-  async addImageEntry({ thread, speaker, buffer, originalName, mimeType }) {
-    const { id, dir, meta } = await this.assertThread(thread);
-    const who = String(speaker ?? "").trim();
-    if (!who) throw new InboxPathError("说话人不能为空");
-    if (!meta.members.includes(who)) {
-      meta.members = normalizeMembers([...meta.members, who]);
-      await this.writeMeta(id, meta);
-    }
-    const ext = extFromUpload(originalName, mimeType);
-    const stamp = timestampSlug();
-    const safeSpeaker = who.replace(/[\\/]/g, "_");
-    const imageName = `${stamp}__${safeSpeaker}${ext}`;
-    const noteName = `${stamp}__${safeSpeaker}.md`;
-    await fs.writeFile(path.join(dir, imageName), buffer);
-    const note =
-      `---\n` +
-      `speaker: ${yamlEscape(who)}\n` +
-      `time: ${new Date().toISOString()}\n` +
-      `thread: ${yamlEscape(id)}\n` +
-      `image: ${imageName}\n` +
-      `---\n\n` +
-      `![${safeSpeaker}](${imageName})\n`;
-    await fs.writeFile(path.join(dir, noteName), note, "utf-8");
-    return {
-      thread: id,
-      speaker: who,
-      path: `inputs/chats/${id}/${imageName}`,
-      notePath: `inputs/chats/${id}/${noteName}`,
-      fileName: imageName,
-    };
+  async writeMeta(dir, meta) {
+    const payload = normalizeMeta(meta.id, meta);
+    await fs.writeFile(path.join(dir, META_FILE), JSON.stringify(payload, null, 2) + "\n", "utf-8");
   }
+
+  async ensureSpeaker(dir, meta, speaker) {
+    if (meta.members.includes(speaker)) return;
+    meta.members = normalizeMembers([...meta.members, speaker]);
+    meta.updatedAt = new Date().toISOString();
+    await this.writeMeta(dir, meta);
+  }
+
+  /**
+   * @param {string} dir
+   * @param {ThreadMeta} meta
+   * @param {ChatMessage} message
+   */
+  async appendMessage(dir, meta, message) {
+    const line = JSON.stringify(message) + "\n";
+    await fs.appendFile(path.join(dir, MESSAGES_FILE), line, "utf-8");
+    await fs.appendFile(path.join(dir, TRANSCRIPT_FILE), formatTranscriptBlock(message), "utf-8");
+    meta.messageCount = (meta.messageCount || 0) + 1;
+    meta.updatedAt = message.ts;
+    await this.writeMeta(dir, meta);
+  }
+}
+
+function publicMeta(meta) {
+  return {
+    id: meta.id,
+    title: meta.title,
+    members: meta.members,
+    kind: meta.kind,
+    schemaVersion: meta.schemaVersion,
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    messageCount: meta.messageCount ?? 0,
+  };
+}
+
+function normalizeMeta(id, raw) {
+  return {
+    schemaVersion: Number(raw.schemaVersion) || SCHEMA_VERSION,
+    id,
+    title: String(raw.title || id),
+    members: normalizeMembers(raw.members || ["我"]),
+    kind: raw.kind === "group" ? "group" : "dm",
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
+    messageCount: Number(raw.messageCount) || 0,
+  };
 }
 
 function normalizeMembers(members) {
@@ -176,11 +323,41 @@ function normalizeMembers(members) {
   return [...new Set(list)];
 }
 
-function yamlEscape(value) {
-  if (/[:#{}[\],&*?|>!%@`]/.test(value) || value.includes("\n") || value.includes('"')) {
-    return JSON.stringify(value);
+function requireSpeaker(speaker) {
+  const who = String(speaker ?? "").trim();
+  if (!who) throw new InboxPathError("说话人不能为空");
+  return who;
+}
+
+function transcriptHeader(meta) {
+  return (
+    `# ${meta.title}\n\n` +
+    `- kind: ${meta.kind}\n` +
+    `- members: ${meta.members.join(", ")}\n` +
+    `- schemaVersion: ${meta.schemaVersion}\n\n` +
+    `<!-- append-only human mirror of messages.jsonl; do not hand-edit if syncing -->\n\n`
+  );
+}
+
+/** @param {ChatMessage} message */
+function formatTranscriptBlock(message) {
+  const local = formatLocalTime(message.ts);
+  if (message.type === "image") {
+    const rel = message.media?.path || "";
+    return `### ${local} · ${message.speaker}\n\n![image](${rel})\n\n`;
   }
-  return value;
+  const text = message.text || "";
+  return `### ${local} · ${message.speaker}\n\n${text}\n\n`;
+}
+
+function formatLocalTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  );
 }
 
 function extFromUpload(name, mime) {

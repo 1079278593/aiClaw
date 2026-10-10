@@ -145,6 +145,15 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
+  const messagesMatch = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname);
+  if (req.method === "GET" && messagesMatch) {
+    const id = decodeURIComponent(messagesMatch[1]);
+    const limit = Number(new URL(req.url || "/", "http://localhost").searchParams.get("limit") || 100);
+    const result = await store.listMessages(id, { limit });
+    sendJson(res, 200, result);
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/entries") {
     const body = await readJson(req);
     const entry = await store.addTextEntry({

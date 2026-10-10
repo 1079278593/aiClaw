@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    try {
+      const theme = localStorage.getItem("aiclaw-theme");
+      if (["light", "daylight", "monochrome"].includes(theme)) {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+    } catch {}
+  </script>
+  <title>aiClaw</title>
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/styles/tokens.css">
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/layout.css">
+  <link rel="stylesheet" href="/styles/chat.css">
+  <link rel="stylesheet" href="/styles/overlays.css">
+  <link rel="stylesheet" href="/styles/product.css">
+  <link rel="stylesheet" href="/styles/workspace.css">
+</head>
+<body>
+
+<!-- ===== Left column: file explorer ===== -->
+<div id="sidebar" aria-label="文档浏览">
+  <div id="sidebar-header">
+    <div class="sidebar-brand">
+      <h1>aiClaw</h1>
+    </div>
+    <button id="sidebar-collapse-btn" class="icon-button" aria-label="收起文件栏" title="收起文件栏">
+      <i data-lucide="panel-left-close"></i>
+    </button>
+  </div>
+  <div id="file-explorer">
+    <div id="file-root-tabs" role="tablist" aria-label="文档根目录"></div>
+    <div id="file-tree" role="tree" aria-label="文档目录"></div>
+  </div>
+  <div id="sidebar-settings">
+    <button id="settings-btn" title="设置" aria-label="设置">
+      <i data-lucide="settings"></i>
+    </button>
+    <button id="help-btn" type="button" title="操作说明" aria-label="操作说明">
+      <i data-lucide="circle-help"></i>
+    </button>
+    <div id="settings-dropdown" class="settings-dropdown">
+      <div class="settings-category" data-category="theme">
+        <span>主题</span>
+        <span class="settings-arrow"><i data-lucide="chevron-right"></i></span>
+        <div class="settings-submenu">
+          <div class="settings-option" data-theme="light">卡其</div>
+          <div class="settings-option" data-theme="daylight">明亮</div>
+          <div class="settings-option" data-theme="monochrome">墨灰</div>
+        </div>
+      </div>
+      <div class="settings-category" data-category="font">
+        <span>字体</span>
+        <span class="settings-arrow"><i data-lucide="chevron-right"></i></span>
+        <div class="settings-submenu">
+          <div class="settings-option" data-font="system">系统默认</div>
+          <div class="settings-option" data-font="kaiti">楷体</div>
+          <div class="settings-option" data-font="simsun">宋体</div>
+        </div>
+      </div>
+      <div class="settings-category" data-category="fontsize" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span>字号</span>
+          <span id="font-size-label" style="font-size:12px;color:var(--muted);">15px</span>
+        </div>
+        <input type="range" id="font-size-slider" min="10" max="20" value="15" step="1" />
+      </div>
+      <div class="settings-category settings-toggle-row">
+        <span>显示生成过程</span>
+        <label class="toggle-wrap" title="显示模型的思考和工具调用">
+          <input type="checkbox" id="show-process-checkbox" aria-label="显示生成过程">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div id="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">未连接</span>
+  </div>
+</div>
+
+<div id="explorer-resize" title="拖拽调整文件栏宽度"></div>
+
+<div id="main">
+  <div class="boot-placeholder">加载中…</div>
+</div>
+
+<!-- ===== Usage Modal ===== -->
+<div id="usage-modal" role="dialog" aria-modal="true" aria-label="Token 统计">
+  <div id="usage-panel">
+    <div id="usage-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="chart-no-axes-combined"></i></span>
+        <strong>token和费用</strong>
+      </div>
+      <div class="usage-header-actions">
+        <div id="usage-tabs">
+          <button class="usage-tab active" type="button" data-tab="daily">每日</button>
+          <button class="usage-tab" type="button" data-tab="total">总量</button>
+        </div>
+        <button id="usage-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+    </div>
+    <div class="panel-scroll-body usage-panel-body">
+      <div id="usage-daily-tab" class="usage-tab-content">
+        <div class="usage-toolbar">
+          <div class="usage-control-group" aria-label="时间范围">
+            <button class="usage-range-btn active" type="button" data-days="7">7天</button>
+            <button class="usage-range-btn" type="button" data-days="30">30天</button>
+          </div>
+          <div class="usage-control-group" aria-label="统计指标">
+            <button class="usage-metric-toggle active" type="button" data-metric="tokens">Token</button>
+            <button class="usage-metric-toggle" type="button" data-metric="cost">费用</button>
+          </div>
+        </div>
+        <div id="usage-daily-empty" class="empty-state usage-empty-state">
+          <div class="empty-state-icon"><i data-lucide="bar-chart-3"></i></div>
+          <p class="empty-state-title">暂无数据</p>
+          <p class="empty-state-copy">发送消息后即可查看 Token 统计</p>
+        </div>
+        <div class="usage-charts-grid">
+          <div id="usage-chart-model-area" class="usage-chart-section" style="display:none">
+            <div class="chart-title">Model</div>
+            <div id="usage-chart-model"></div>
+            <div id="usage-legend-model" class="usage-legend"></div>
+          </div>
+          <div id="usage-chart-provider-area" class="usage-chart-section" style="display:none">
+            <div class="chart-title">Provider</div>
+            <div id="usage-chart-provider"></div>
+            <div id="usage-legend-provider" class="usage-legend"></div>
+          </div>
+        </div>
+      </div>
+      <div id="usage-total-tab" class="usage-tab-content" style="display:none">
+        <div id="usage-empty" class="empty-state usage-empty-state">
+          <div class="empty-state-icon"><i data-lucide="bar-chart-3"></i></div>
+          <p class="empty-state-title">暂无数据</p>
+          <p class="empty-state-copy">发送消息后即可查看 Token 统计</p>
+        </div>
+        <table id="usage-table" style="display:none">
+          <thead>
+            <tr>
+              <th>模型</th>
+              <th>提供商</th>
+              <th>总缓存输入</th>
+              <th>总未缓存输入</th>
+              <th>总输出</th>
+              <th>费用</th>
+            </tr>
+          </thead>
+          <tbody id="usage-table-body"></tbody>
+          <tfoot id="usage-table-foot"></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Git Sync Modal ===== -->
+<div id="git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="git-sync-title">
+  <div id="git-sync-panel">
+    <div id="git-sync-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="git-compare-arrows"></i></span>
+        <strong id="git-sync-title">数据同步</strong>
+      </div>
+      <button id="git-sync-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="git-sync-panel-body">
+      <div class="git-sync-status-card">
+        <div class="git-sync-status-row"><span>数据目录</span><code id="git-sync-data-dir">加载中...</code></div>
+        <div class="git-sync-status-row"><span>分支</span><code id="git-sync-branch">加载中...</code></div>
+        <div class="git-sync-status-row"><span>上游</span><code id="git-sync-upstream">加载中...</code></div>
+      </div>
+      <div class="git-sync-status-card">
+        <div class="git-sync-status-row"><span>工作区</span><span id="git-sync-worktree" class="git-sync-state">加载中...</span></div>
+      </div>
+      <h2 class="git-sync-section-title">同步操作</h2>
+      <p class="git-sync-hint">同步内容由数据目录的 <code>.gitignore</code> 决定。操作只执行显示的 Git 命令；遇到冲突、分叉或认证问题会立即停止，请在终端手动处理。</p>
+      <div class="git-sync-operations">
+        <button id="git-sync-pull-btn" class="git-sync-operation" type="button">
+          <span class="git-sync-operation-head"><i data-lucide="download"></i><strong class="git-sync-operation-name">拉取更新</strong></span>
+          <span>仅在工作区干净时拉取远端的快进更新。</span>
+          <code>git pull --ff-only</code>
+        </button>
+        <button id="git-sync-push-btn" class="git-sync-operation" type="button">
+          <span class="git-sync-operation-head"><i data-lucide="upload"></i><strong class="git-sync-operation-name">提交并推送</strong></span>
+          <span>暂存未忽略的变更，创建提交并推送到上游。</span>
+          <code>git add -A; commit; push</code>
+        </button>
+      </div>
+      <div id="git-sync-result" class="git-sync-result" aria-live="polite">
+        <div class="git-sync-result-header"><strong id="git-sync-result-title"></strong><button id="git-sync-copy-btn" type="button">复制结果</button></div>
+        <pre id="git-sync-result-output"></pre>
+      </div>
+      <p id="git-sync-manual-note" class="git-sync-manual-note" hidden>操作已停止，未自动处理。请在数据目录的终端中检查并解决问题后再试。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Knowledge Modal ===== -->
+<div id="knowledge-modal" role="dialog" aria-modal="true" aria-label="知识库">
+  <div id="knowledge-panel">
+    <div id="knowledge-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="book-open"></i></span>
+        <strong>知识库</strong>
+      </div>
+      <button id="knowledge-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-scroll-body">
+      <div id="knowledge-empty" class="empty-state" style="padding:24px 0">
+        <div class="empty-state-icon"><i data-lucide="book-open"></i></div>
+        <p class="empty-state-title">暂无知识库</p>
+        <p class="empty-state-copy">在数据目录中配置知识库即可使用</p>
+      </div>
+      <div id="knowledge-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Help Modal ===== -->
+<div id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-panel-title">
+  <div id="help-panel">
+    <div id="help-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="circle-help"></i></span>
+        <strong id="help-panel-title">操作说明</strong>
+      </div>
+      <button id="help-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-scroll-body help-content">
+      <h2>面板介绍</h2>
+      <ul>
+        <li><strong>左侧文件栏</strong>：顶部一行是 <code>knowledge_base</code>、<code>inputs</code> 与 <code>trilium</code> 三个根目录。选中后下方显示目录树；点击目录可展开/收起，子目录自动缩进。点击文件在中间打开阅读。</li>
+        <li><strong>中间阅读区</strong>：显示左侧打开的文档，可多标签切换；默认只读预览，点击“编辑”进入编辑模式（支持 Markdown 预览 / 图片查看）。</li>
+        <li><strong>右侧聊天栏</strong>：顶栏第一行是＋新建对话按钮，下方为当前会话的对话与输入框。点击顶栏历史按钮可打开会话列表，切换/重命名/删除历史对话。</li>
+      </ul>
+
+      <h2>一般流程</h2>
+      <ol>
+        <li>外部文件或图片放入<code>${AICLAW_DATA_DIR}/inputs/</code>中，或提供网址供AI读取</li>
+        <li>在左侧选择文件，在中间阅读区划选关键内容（或直接基于打开的文档）</li>
+        <li>在右侧与AI聊天总结该文档主要内容</li>
+        <li>要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件。</li>
+      </ol>
+
+      <h2>编辑与保存</h2>
+      <p>中间阅读区默认是只读预览。点击工具栏“编辑”按钮切换为可编辑文本框，此时“编辑”按钮变为“保存并退出”；点击后保存并回到预览。也可随时按 <strong>Ctrl/Cmd + S</strong> 保存并停留在编辑状态，状态栏会短暂提示“已保存”。切换标签、关闭标签或刷新时，正在编辑的内容会自动保存（trilium 笔记为只读，不提供编辑）。</p>
+
+      <h2>系统 Prompt</h2>
+      <p>系统提示词文件位于 <code>files/prompts/agent_system_prompt.txt</code>，初始化时从模板复制。每次对话启动时程序会读取该文件并在末尾自动追加 <code>今天的日期是YYYY/MM/DD</code> 行。编辑该文件即可定制 AI 的行为规则、工具使用策略和回答风格，修改后下次发送消息时生效，无需重启服务。压缩对话用的 prompt 同理，位于 <code>files/prompts/compaction_prompt.txt</code>。</p>
+
+      <h2>左侧文件栏</h2>
+      <h3>目录树</h3>
+      <p>顶部一行是 <code>knowledge_base</code>、<code>inputs</code>、<code>trilium（只读）</code> 三个根目录，点击切换当前浏览的根。下方是目录树：点目录行可展开/收起，再嵌套的子目录自动缩进；点击文件行在中间阅读区打开。右上角刷新按钮用于重新拉取目录，AI 通过工具写入/删除文件后列表也会自动刷新。</p>
+      <h3>文件栏宽度</h3>
+      <p>文件栏可通过左边缘按钮收起/展开，或拖拽右边缘的分隔条调整宽度。</p>
+      <h3>会话管理</h3>
+      <p>会话（对话历史）在右侧聊天栏管理：点顶栏＋新对话，历史面板中悬停行可删除，双击标题可重命名。</p>
+      <h3>设置</h3>
+      <p>文件栏左下角 ⚙ 设置面板提供以下自定义：</p>
+      <ul>
+        <li><strong>主题</strong>：卡其、明亮（纯白）、墨灰（深色）</li>
+        <li><strong>字体</strong>：系统默认、楷体、宋体，仅影响消息与文档的 Markdown 渲染区域</li>
+        <li><strong>字号</strong>：10-20px 滑块，实时预览</li>
+        <li><strong>显示生成过程</strong>：默认使用精简模式，仅显示最新过程状态与最终回复；开启后显示完整思考和工具调用过程，并在刷新后保持开启。</li>
+      </ul>
+      <p>主题、字体和字号设置保存在浏览器 localStorage 中。显示生成过程关闭或未设置时使用默认的精简模式。</p>
+      <h3>连接状态</h3>
+      <p>文件栏左下角状态栏显示 WebSocket 连接状态：绿点表示已连接，灰点表示未连接。断线时自动尝试重连。</p>
+
+      <h2>中间阅读区</h2>
+      <h3>文件标签页</h3>
+      <p>阅读区顶部是文件标签页，打开过的文件会保留为标签，可随时切换、关闭：</p>
+      <ul>
+        <li>点击文件打开的是<strong>临时标签</strong>（文件名为斜体），此时再点击其他文件，临时标签会被替换为新文件，不会无限堆积标签</li>
+        <li><strong>双击</strong>临时标签可将其固定为<strong>常驻标签</strong>（标准字体）；此后点击其他文件会新建临时标签</li>
+        <li>点击标签右侧 × 可关闭任意标签；关闭当前标签后，该文件不再作为下一条消息的文档引用</li>
+        <li>标签列表与所选根目录保存在浏览器中，刷新页面后保留</li>
+      </ul>
+      <h3>工具栏按钮</h3>
+      <ul>
+        <li><strong>刷新</strong>：重新加载当前根目录树并重新读取当前标签内容</li>
+        <li><strong>编辑 / 保存</strong>：切换文本编辑模式，详见上文“编辑与保存”</li>
+      </ul>
+      <h3>划选文字带入对话</h3>
+      <p>在中间文档中划选文字后，发送下一条消息时会自动附带当前打开的文件路径及选中内容和行号，让模型知道你正在引用文档的哪一段。如果打开了文件但没有选择文字，也会传递“文件已打开”的信息。关闭当前标签页即可清除该上下文；也可用输入框左下角的文件图标按钮开关此行为。</p>
+
+      <h2>右侧聊天栏</h2>
+      <h3>会话切换与新建</h3>
+      <p>顶栏第一行的＋按钮新建对话；历史按钮可随时展开会话列表：点击切换会话，悬停行尾部×可删除，双击标题可重命名。不选会话时聊天区直接显示历史会话入口。</p>
+      <p>聊天栏可通过拖拽左边缘分隔条调整宽度。</p>
+
+      <h2>聊天与输入（右侧聊天栏）</h2>
+      <h3>引用文件 @</h3>
+      <p>在输入框中输入 <code>@</code> 会弹出文件搜索面板，实时搜索 <code>allowedDirs</code> 中的文件。输入 <code>@</code> 时，当前打开的标签页文件默认显示在列表前方；继续输入关键词后，匹配的已打开标签文件仍优先于其他搜索结果。用 ↑↓ 键或鼠标选择文件，回车或点击确认后插入 <code>[路径]</code> 格式的引用。</p>
+      <h3>常用命令 /</h3>
+      <p>输入 <code>/</code> 弹出命令面板，从 <code>files/commands.md</code> 中匹配预设的 Slash 命令模板。选中后命令的 prompt 文本会替换掉 <code>/</code> 触发符，可直接编辑或发送。可根据需要添加常用命令。</p>
+      <h3>发送图片</h3>
+      <ol>
+        <li>在输入框中直接粘贴剪贴板中的图片（Ctrl+V），支持多张。图片会作为附件随消息发送，视觉模型可读取其中的内容。每张图片可单独移除。</li>
+        <li>在中间阅读区打开该图片，要求模型读取。</li>
+        <li>在输入框@该文件，要求模型读取。</li>
+      </ol>
+      <h3>工具权限控制</h3>
+      <p>输入框底部最左边"写入权限"开关：打开后 write / edit / delete / move / web_search / web_fetch 六类操作全部跳过确认弹窗，直接执行。关闭时这六类操作每次都会弹出确认框，展示操作路径和内容预览，需手动批准。切换开关只影响之后发起的权限请求，当前已显示的确认框仍需手动选择。read / list / grep 等只读工具始终直接执行，不受此开关影响。</p>
+      <h3>compact 压缩对话</h3>
+      <p>输入框底部左边第二按钮Compact按钮：长对话可通过该按钮触发 LLM 摘要压缩。弹出窗口可选择保留最近 0-3 轮对话，确认后原对话归档到 <code>conversation_archive/</code>，当前会话替换为摘要版本。适合在上下文较长时缩减 token 用量。Compact 按钮右侧显示当前会话最后一次 LLM 请求的总上下文长度，按 <code>inputTokens + billingOutputTokens</code> 计算，包含思考 Token。该数值仅在当前浏览器页面的会话缓存中保留，切换会话时显示各自的最近值，刷新页面后清空。</p>
+      <h3>取消模型生成</h3>
+      <p>模型生成过程中，发送按钮会变为 ⏹ 停止按钮。点击后立即中断当前请求，已输出的内容保留在对话中并标注"(已取消)"。</p>
+      <h3>从对话流的中间重新开始</h3>
+      <p>每条用户消息右侧有 ↺ 按钮。点击后确认截断，该消息之后的所有回复被删除，原文回填到输入框供你修改后重新发送。</p>
+      <h3>Token 计数、会话用量与费用统计</h3>
+      <p>点击工具栏的 📊 按钮可打开完整用量与费用统计面板：</p>
+      <ul>
+        <li><strong>每日</strong>：7 天或 30 天的堆叠柱状图，按模型和 Provider 分色展示每日 Token 用量；可切换到费用视图查看每日费用</li>
+        <li><strong>总量</strong>：按模型 + Provider 汇总总缓存输入、总未缓存输入（两者相加为总输入）、总输出和总费用</li>
+      </ul>
+      <p>费用按模型配置中的 <code>cost</code> 单价计算；未配置单价的模型费用记为 0。<code>cost</code> 可选配 <code>schedules</code> 分时段价格（如工作日高峰价、夜间闲时价），按北京时间匹配第一个命中的时段，未命中时使用顶层单价；不配 <code>schedules</code> 时行为与固定单价一致。统计数据持久化在 <code>files/usage_daily.json</code> 和 <code>files/usage_total.json</code> 中。</p>
+      <h3>知识库浏览</h3>
+      <p>右侧聊天栏顶部的 📖 按钮可打开知识库总览面板，列出所有知识库及其包含的文件。每个知识库卡片显示名称、描述和文件列表，超过 5 个文件时可点击展开查看全部。</p>
+
+      <h3>Git 数据同步</h3>
+      <p>顶部工具栏的同步按钮可打开数据同步面板。数据目录必须是已配置远端和上游分支的 Git 工作树；同步范围完全由数据目录中的 <code>.gitignore</code> 决定。</p>
+      <ul>
+        <li><strong>拉取更新</strong>：工作区干净时拉取远程更新，工作区有任何未提交修改时立即停止。历史分叉、冲突、认证和网络错误均不会自动处理。</li>
+        <li><strong>提交并推送</strong>：依次自动执行 <code>git add -A</code>、检查暂存区、创建带时间戳的提交，然后执行 <code>git push</code>。没有变更时不会创建空提交；推送失败时已创建的本地提交会保留。</li>
+      </ul>
+      <p>程序不会自动 stash、merge、rebase、force push 或覆盖文件。遇到异常请在数据目录的终端中手动处理。非回环地址监听时，同步按钮和 Git 接口都会隐藏/禁用。</p>
+
+      <h2>异地使用</h2>
+      <p>所有的本地数据就放置在<code>${AICLAW_DATA_DIR}</code>这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Compact Modal ===== -->
+<div id="compact-modal" role="dialog" aria-modal="true" aria-label="压缩会话">
+  <div id="compact-panel">
+    <div id="compact-panel-header">
+      <strong>压缩会话</strong>
+    </div>
+    <div id="compact-panel-body">
+      <p>当前会话会被替换为摘要版本。确认继续？</p>
+      <div class="compact-rounds-row">
+        <label for="compact-keep-rounds">保留最近对话</label>
+        <select id="compact-keep-rounds">
+          <option value="0">所有消息</option>
+          <option value="1">保留最后一轮</option>
+          <option value="2">保留最后两轮</option>
+          <option value="3">保留最后三轮</option>
+        </select>
+      </div>
+    </div>
+    <div id="compact-panel-footer">
+      <button id="compact-cancel-btn" type="button">取消</button>
+      <button id="compact-confirm-btn" type="button">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- Access token gate (shown only when server.authRequired) -->
+<div id="access-token-gate" class="access-token-gate" role="dialog" aria-modal="true" aria-labelledby="access-token-title">
+  <div class="access-token-panel">
+    <h2 id="access-token-title">需要访问令牌</h2>
+    <p>服务器已启用 <code>server.accessToken</code>。请输入令牌以连接 API 与 WebSocket。</p>
+    <input id="access-token-input" type="password" autocomplete="current-password" placeholder="access token">
+    <button id="access-token-save" type="button">保存并继续</button>
+    <p id="access-token-status" class="access-token-status"></p>
+  </div>
+</div>
+
+<!-- ===== Vendor Scripts ===== -->
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/katex/contrib/auto-render.min.js"></script>
+<script src="/vendor/lucide/umd/lucide.min.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

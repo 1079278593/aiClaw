@@ -163,7 +163,7 @@ els.sendTextBtn.addEventListener("click", async () => {
       json: { thread, speaker, text },
     });
     els.textInput.value = "";
-    setStatus(els.mainStatus, `已保存 ${data.entry.fileName}`, "ok");
+    setStatus(els.mainStatus, `已写入 ${data.entry.message?.id || "ok"}`, "ok");
   } catch (err) {
     setStatus(els.mainStatus, err.message, "error");
   }
@@ -188,7 +188,7 @@ els.sendImageBtn.addEventListener("click", async () => {
   try {
     const data = await api("/api/entries/image", { method: "POST", body });
     els.imageInput.value = "";
-    setStatus(els.mainStatus, `已上传 ${data.entry.fileName}`, "ok");
+    setStatus(els.mainStatus, `已上传 ${data.entry.message?.id || "ok"}`, "ok");
   } catch (err) {
     setStatus(els.mainStatus, err.message, "error");
   }

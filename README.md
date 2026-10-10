@@ -11,11 +11,14 @@
 
 ## 快速开始
 
+以下命令都在 `server/` 目录执行。
+
 ```powershell
+cd server
 pnpm install
 ```
 
-在项目根目录创建 .env，并指定用户数据目录
+在 `server/` 创建 .env，并指定用户数据目录
 ```
 AICLAW_DATA_DIR=D:\MyData
 ```
@@ -34,13 +37,13 @@ pnpm start
 
 浏览器打开 `http://127.0.0.1:3000`。启动时也可使用 `pnpm start -- -p 8080` 或 `pnpm start -- --host 0.0.0.0` 覆盖端口和地址。
 
-完成首次配置后，也可双击项目根目录的 `start.bat`（Windows）或 `start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
+完成首次配置后，也可双击 `server/start.bat`（Windows）或 `server/start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
 
 `AICLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
 
 ## 配置
 
-首次执行 `init` 后，模板配置写入 `{AICLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](templates/config.json) 为准；以下示例展示配置结构：
+首次执行 `init` 后，模板配置写入 `{AICLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](server/templates/config.json) 为准；以下示例展示配置结构：
 
 ```jsonc
 {
@@ -152,7 +155,7 @@ pnpm start
 - `thinking` 是模型支持的思考选项。每个选项通过 `params` 原样传给该提供商；`thinkingOff` 定义关闭思考时的参数。
 - `modal: "vl"` 可标记支持视觉输入的模型。
 - 文件工具只能访问 `fs.allowedDirs` 与 `fs.allowedFiles`。路径均相对于数据目录。
-- Tavily 配置完整字段和默认值见 [schema.ts](src/config/schema.ts)。
+- Tavily 配置完整字段和默认值见 [schema.ts](server/src/config/schema.ts)。
 - `tools.trilium`：可选只读接入 Trilium / TriliumNext。`enabled` 且填写 ETAPI `token` 后，右侧栏出现 `trilium` 根目录，AI 可搜索和阅读笔记，不能写入。建议设置 `ancestorNoteId` 限制可读子树。已有数据目录的系统提示词不会自动更新，需在 `files/prompts/agent_system_prompt.txt` 中自行补上 Trilium 说明。
 
 ## 功能
@@ -338,6 +341,8 @@ aiclaw status                  # 检查配置、数据目录与启动条件
 WebSocket 地址为 `ws://127.0.0.1:3000/ws`，用于会话切换、聊天流、工具权限请求和心跳。
 
 ## 开发
+
+在 `server/` 目录执行：
 
 ```bash
 pnpm dev              # 以 tsx 运行 CLI

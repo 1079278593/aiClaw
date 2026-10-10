@@ -1,72 +1,74 @@
 # aiclaw-inbox
 
-手机收件箱：把文字 / 图片写入 `$AICLAW_DATA_DIR/inputs/chats/<会话>/`，带说话人字段。  
-与主程序 **进程分离**，适合部署在 NAS；本机也可先试跑。
+手机收件箱服务：写入 `$AICLAW_DATA_DIR/inputs/chats/`。  
+与 aiClaw **进程分离**，适合 NAS 部署。
 
-## 落盘约定
+## 存储模型（长期可维护）
+
+**真相源是 append-only 的 `messages.jsonl`**（与主程序会话 JSONL 同一思路），不是「一句一个 md」。
 
 ```text
-inputs/chats/
-  张三/
-    _thread.json
-    2026-10-09_153012_001.md
-  周末聚餐/
-    _thread.json
-    2026-10-09_160001_001.md
+inputs/chats/<threadId>/
+  meta.json           # schemaVersion、成员、dm/group、计数
+  messages.jsonl      # 每行一条消息（唯一写入主账本）
+  media/              # 图片等二进制
+  transcript.md       # 由 jsonl 派生的可读镜像（追加同步，便于人眼/AI 扫读）
 ```
 
-`_thread.json` 示例：
+消息行示例：
 
 ```json
-{
-  "title": "张三",
-  "members": ["我", "张三"],
-  "kind": "dm"
-}
+{"v":1,"id":"msg_…","ts":"2026-10-10T01:20:08.019Z","speaker":"我","type":"text","text":"……"}
+{"v":1,"id":"msg_…","ts":"…","speaker":"张三","type":"image","media":{"path":"media/….jpg","mime":"image/jpeg","bytes":12345}}
 ```
 
-条目 Markdown 含 YAML：`speaker` / `time` / `thread`。
+设计要点：
+
+- **事件日志**：只追加、不改历史，Git/备份/并发都更稳
+- **schemaVersion**：以后改格式可迁移
+- **稳定 message id**：可引用、可去重
+- **meta / messages / media 分离**：职责清晰
+- **transcript.md**：给人看；程序以 jsonl 为准
+
+旧版「一句一文件」已废弃，勿再使用。
 
 ## 本机试跑
 
 ```bash
 cd inbox
-cp .env.example .env
-# 编辑 .env：AICLAW_DATA_DIR、INBOX_TOKEN
-pnpm install   # 或 npm install
+cp .env.example .env   # 设置 AICLAW_DATA_DIR、INBOX_TOKEN
+pnpm install
 pnpm start
 ```
 
-浏览器打开 `http://127.0.0.1:8787`，填入 Token。
+打开 `http://127.0.0.1:8787`，填入 Token。
 
-## API（均需 `Authorization: Bearer <INBOX_TOKEN>`）
+## API（`Authorization: Bearer <INBOX_TOKEN>`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/threads` | 会话列表 |
 | POST | `/api/threads` | `{ title, kind, members? }` |
-| PATCH | `/api/threads/:id` | 更新 members 等 |
-| POST | `/api/entries` | `{ thread, speaker, text }` |
+| PATCH | `/api/threads/:id` | 更新成员等 |
+| GET | `/api/threads/:id/messages?limit=100` | 读取消息（时间正序） |
+| POST | `/api/entries` | `{ thread, speaker, text }` → 追加 jsonl |
 | POST | `/api/entries/image` | multipart: `thread`, `speaker`, `file` |
 
-## NAS 部署提示
+## NAS
 
-1. 数据目录挂到容器：`AICLAW_DATA_DIR=/data` → volume 映射你的 aiclaw-data。
-2. 设置强随机 `INBOX_TOKEN`。
-3. 反代 HTTPS 到 `8787`（与 Trilium 同类）。
-4. iPhone 用 Safari 打开该域名；语音用**系统键盘听写**后点提交。
+见下方 Docker 示例；反代 HTTPS；数据 volume 挂到 aiclaw-data。
 
 ```bash
 docker build -t aiclaw-inbox .
 docker run -d --name aiclaw-inbox \
   -p 8787:8787 \
   -e AICLAW_DATA_DIR=/data \
-  -e INBOX_TOKEN=你的强随机串 \
+  -e INBOX_TOKEN=强随机串 \
   -v /path/on/nas/aiclaw-data:/data \
   aiclaw-inbox
 ```
 
-## 语音说明（iPhone）
+## iPhone 语音
 
-一期不内置 Web Speech。点输入框 → 键盘麦克风听写 → 确认文字 → 提交。体验不够再考虑薄 App（同一 API）。
+用系统键盘听写填入文本框再提交。不够再上薄 App（同一 API）。
