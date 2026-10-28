@@ -8,11 +8,16 @@ import { flushUsage, getDailyStats, getUsageStats } from "../services/usage-stor
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson } from "../http-types.js";
 import { isTriliumEnabled } from "../../trilium/paths.js";
+import { serverVersion } from "../../version.js";
 
 export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, gitSyncEnabled, logger }) => {
   // /health is handled in http.ts (public). Keep a duplicate here only if reached somehow.
   if (url.pathname === "/health" && req.method === "GET") {
-    sendJson(res, { status: "ok", authRequired: await authIsRequired(config.server.accessToken) });
+    sendJson(res, {
+      status: "ok",
+      authRequired: await authIsRequired(config.server.accessToken),
+      ...serverVersion(),
+    });
     return true;
   }
   if (url.pathname === "/api/account/token/rotate" && req.method === "POST") {

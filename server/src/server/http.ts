@@ -19,6 +19,7 @@ import { handleSessionRoutes } from "./routes/sessions.js";
 import { handleSystemRoutes } from "./routes/system.js";
 import { consumeRateLimit, HTTP_LIMIT_PER_MINUTE } from "./rate-limit.js";
 import { handleStaticRequest } from "./static-assets.js";
+import { serverVersion } from "../version.js";
 
 export function createHttpHandler(options: {
   host: string;
@@ -43,6 +44,7 @@ export function createHttpHandler(options: {
         sendJson(res, {
           status: "ok",
           authRequired: await authIsRequired(config.server.accessToken),
+          ...serverVersion(),
         });
         return;
       }

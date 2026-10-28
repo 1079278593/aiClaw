@@ -838,6 +838,35 @@ body.reflections-workspace #doc-preview-content {
   margin-bottom: 8px;
 }
 
+.reflections-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.reflections-expand {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.reflections-subfolders,
+.reflections-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+.reflections-group {
+  margin: 16px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+#reflection-title {
+  font-size: 22px;
+}
+#reflection-body {
+  font-size: 15px;
+}
+
 .reflections-folder {
   text-align: left;
   border: 0;

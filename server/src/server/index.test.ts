@@ -569,10 +569,12 @@ describe("server", () => {
 
   it("exposes authRequired on public health", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
-    const data = await res.json() as { status: string; authRequired: boolean };
+    const data = await res.json() as { status: string; authRequired: boolean; version: string; commit: string };
     expect(res.status).toBe(200);
     expect(data.status).toBe("ok");
     expect(data.authRequired).toBe(false);
+    expect(data.version.length).toBeGreaterThan(0);
+    expect(typeof data.commit).toBe("string");
   });
 });
 
@@ -620,9 +622,10 @@ describe("server multi-client auth", () => {
 
   it("keeps /health public with authRequired true", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
-    const data = await res.json() as { status: string; authRequired: boolean };
+    const data = await res.json() as { status: string; authRequired: boolean; version: string };
     expect(data.status).toBe("ok");
     expect(data.authRequired).toBe(true);
+    expect(data.version.length).toBeGreaterThan(0);
   });
 
   it("requires Bearer for /api and allows correct token", async () => {

@@ -145,7 +145,7 @@ $AICLAW_DATA_DIR/
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/` | Serve SPA UI |
-| GET | `/health` | Health check（公开；含 `authRequired`） |
+| GET | `/health` | Health check（公开；含 `authRequired`、`version`、`commit`） |
 | GET | `/api/config` | Available providers, models, defaults, `triliumEnabled` |
 | GET | `/api/sessions` | List all sessions |
 | POST | `/api/sessions` | Create session |

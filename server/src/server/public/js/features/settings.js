@@ -9,7 +9,21 @@ const FONT_MAP = {
   simsun: '"SimSun", "STSong", "Noto Serif CJK SC", serif',
 };
 
+function showVersion(version, commit) {
+  const settings = document.getElementById("settings-version");
+  if (settings) settings.textContent = commit ? `版本 ${version} · ${commit}` : `版本 ${version}`;
+}
+
 export function initSettings() {
+  fetch("/health")
+    .then((response) => response.json())
+    .then((data) => {
+      const version = typeof data?.version === "string" && data.version ? data.version : "dev";
+      const commit = typeof data?.commit === "string" ? data.commit : "";
+      showVersion(version, commit);
+    })
+    .catch(() => showVersion("dev", ""));
+
   const updateThemeActive = () => {
     const current = document.documentElement.getAttribute("data-theme") || "light";
     document.querySelectorAll(".settings-option[data-theme]").forEach((element) => {

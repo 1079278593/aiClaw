@@ -1,15 +1,15 @@
 import { jsonRequest, requestJson } from "../api.js";
 import { escHtml } from "../format.js";
 
+const ROOT = "inputs/reflections";
+
 export function createReflectionsFeature({ state, actions }) {
-  let items = [];
   let tree = [];
   let currentPath = "";
   let draft = null;
   let dirty = false;
-  let viewMode = "list"; // list | tree
-  let query = "";
-  let filterFolder = ""; // tree 模式下选中的目录（相对 reflections 根）
+  let selectedFolder = "";
+  const expanded = new Set();
 
   function syncPreview() {
     if (state.workspace !== "reflections" || !currentPath) {
@@ -19,105 +19,151 @@ export function createReflectionsFeature({ state, actions }) {
     state.reflectionPreview = { previewPath: currentPath };
   }
 
-  async function loadList(selectPath) {
-    const q = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
-    const { data } = await requestJson(`/api/reflections${q}`);
-    items = data.reflections || [];
-    if (viewMode === "tree") {
-      const treeRes = await requestJson("/api/reflections?view=tree");
-      tree = treeRes.data.tree || [];
-    }
-    renderList();
-    const target = selectPath || currentPath;
-    const visible = visibleItems();
-    if (target && (items.some((item) => item.path === target) || visible.some((item) => item.path === target))) {
-      await openPath(target);
-    } else if (visible[0]) {
-      await openPath(visible[0].path);
-    } else {
-      currentPath = "";
-      draft = null;
-      renderStage();
-      syncPreview();
-    }
+  function folderKey(path) {
+    if (!path || path === ROOT) return "";
+    return path.startsWith(`${ROOT}/`) ? path.slice(ROOT.length + 1) : path;
   }
 
-  function visibleItems() {
-    if (viewMode !== "tree" || !filterFolder) return items;
-    const prefix = filterFolder === "" ? "inputs/reflections/" : `inputs/reflections/${filterFolder}/`;
-    return items.filter((item) => item.path.startsWith(prefix) && !item.path.slice(prefix.length).includes("/"));
-  }
-
-  function renderList() {
-    const toolbar = document.getElementById("reflections-toolbar");
-    const list = document.getElementById("reflections-list");
-    if (!toolbar || !list) return;
-    toolbar.innerHTML = `
-      <button type="button" data-view="list" class="${viewMode === "list" ? "active" : ""}">时间序</button>
-      <button type="button" data-view="tree" class="${viewMode === "tree" ? "active" : ""}">目录</button>
-      <button type="button" id="reflections-create">新建</button>
-      <button type="button" id="reflections-import">粘贴导入</button>
-      <button type="button" id="reflections-import-file">拆分文件</button>
-      <button type="button" id="reflections-mkdir">新建文件夹</button>
-      <input id="reflections-search" type="search" placeholder="搜索" value="${escHtml(query)}">`;
-    toolbar.querySelectorAll("[data-view]").forEach((button) => {
-      button.addEventListener("click", () => {
-        viewMode = button.dataset.view;
-        void loadList(currentPath);
-      });
-    });
-    toolbar.querySelector("#reflections-create")?.addEventListener("click", () => void createBlank());
-    toolbar.querySelector("#reflections-import")?.addEventListener("click", () => void importPaste());
-    toolbar.querySelector("#reflections-import-file")?.addEventListener("click", () => void importFile());
-    toolbar.querySelector("#reflections-mkdir")?.addEventListener("click", () => void makeDir());
-    const search = toolbar.querySelector("#reflections-search");
-    search?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        query = search.value || "";
-        void loadList(currentPath);
-      }
-    });
-
-    if (viewMode === "tree") {
-      list.innerHTML = `
-        <div class="reflections-tree">
-          <button type="button" class="reflections-folder ${filterFolder === "" ? "active" : ""}" data-folder="">全部</button>
-          ${renderTreeNodes(tree, 0)}
-        </div>
-        <div class="reflections-tree-files">${renderFileRows(visibleItems())}</div>`;
-      list.querySelectorAll("[data-folder]").forEach((button) => {
-        button.addEventListener("click", () => {
-          filterFolder = button.dataset.folder || "";
-          renderList();
-        });
-      });
-    } else {
-      filterFolder = "";
-      list.innerHTML = renderFileRows(items);
+  function findNode(nodes, path) {
+    for (const node of nodes || []) {
+      if (node.path === path) return node;
+      const nested = findNode(node.children || [], path);
+      if (nested) return nested;
     }
-    list.querySelectorAll(".reflections-row[data-path]").forEach((button) => {
-      button.addEventListener("click", () => void openPath(button.dataset.path));
-    });
+    return null;
   }
 
-  function renderTreeNodes(nodes, depth) {
+  async function loadTree() {
+    const { data } = await requestJson("/api/reflections?view=tree");
+    tree = (data.tree || []).filter((node) => node.kind === "directory");
+    renderFolders();
+    renderStage();
+    syncPreview();
+  }
+
+  function renderFolderNodes(nodes, depth) {
     return (nodes || []).filter((node) => node.kind === "directory").map((node) => {
-      const folder = node.path.replace(/^inputs\/reflections\/?/, "");
-      const active = filterFolder === folder ? "active" : "";
+      const children = (node.children || []).filter((child) => child.kind === "directory");
+      const open = expanded.has(node.path);
+      const active = selectedFolder === node.path ? "active" : "";
       return `
-        <button type="button" class="reflections-folder ${active}" data-folder="${escHtml(folder)}" style="padding-left:${8 + depth * 12}px">
-          ${escHtml(node.name || "/")}
-        </button>
-        ${renderTreeNodes(node.children || [], depth + 1)}`;
+        <div class="reflections-folder-row" style="padding-left:${8 + depth * 14}px">
+          <button type="button" class="reflections-folder ${active}" data-folder="${escHtml(node.path)}">${escHtml(node.name || "/")}</button>
+          ${children.length ? `<button type="button" class="reflections-expand" data-expand="${escHtml(node.path)}">${open ? "▾" : "▸"}</button>` : ""}
+        </div>
+        ${open ? renderFolderNodes(children, depth + 1) : ""}`;
     }).join("");
   }
 
-  function renderFileRows(rows) {
-    return rows.map((item) => `
-      <button type="button" class="reflections-row ${item.path === currentPath ? "active" : ""}" data-path="${escHtml(item.path)}">
-        <strong>${escHtml(item.title || "未命名")}</strong>
-        <span>${escHtml(formatOccurred(item.occurredAt))}${item.context ? ` · ${escHtml(item.context)}` : ""}${item.folder ? ` · ${escHtml(item.folder)}` : ""}</span>
-      </button>`).join("") || `<p class="empty-state-copy">还没有心得。可新建，或把文件拖进数据目录 inputs/reflections/</p>`;
+  function renderFolders() {
+    const list = document.getElementById("reflections-list");
+    const toolbar = document.getElementById("reflections-toolbar");
+    if (toolbar) {
+      toolbar.innerHTML = `
+        <button type="button" id="reflections-mkdir">新建文件夹</button>
+        <button type="button" id="reflections-import">粘贴导入</button>
+        <button type="button" id="reflections-import-file">拆分文件</button>`;
+      toolbar.querySelector("#reflections-mkdir")?.addEventListener("click", () => void makeDir());
+      toolbar.querySelector("#reflections-import")?.addEventListener("click", () => void importPaste());
+      toolbar.querySelector("#reflections-import-file")?.addEventListener("click", () => void importFile());
+    }
+    if (!list) return;
+    list.innerHTML = renderFolderNodes(tree, 0) || `<p class="empty-state-copy">还没有文件夹</p>`;
+    list.querySelectorAll("[data-folder]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedFolder = button.dataset.folder || "";
+        renderFolders();
+        renderStage();
+      });
+    });
+    list.querySelectorAll("[data-expand]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const path = button.dataset.expand || "";
+        if (expanded.has(path)) expanded.delete(path);
+        else expanded.add(path);
+        renderFolders();
+      });
+    });
+  }
+
+  function renderStage() {
+    const panel = document.getElementById("document-panel");
+    if (!panel || state.workspace !== "reflections") return;
+    let stage = document.getElementById("reflections-stage");
+    if (!stage) {
+      stage = document.createElement("div");
+      stage.id = "reflections-stage";
+      panel.appendChild(stage);
+    }
+    const folder = findNode(tree, selectedFolder);
+    if (!folder) {
+      stage.innerHTML = `<p class="empty-state-copy">选择一个文件夹</p>`;
+      return;
+    }
+    const subfolders = (folder.children || []).filter((node) => node.kind === "directory");
+    const notes = (folder.children || []).filter((node) => node.kind === "file");
+    const groups = groupNotes(notes);
+    stage.innerHTML = `
+      <div class="reflections-notes">
+        ${subfolders.length ? `<div class="reflections-subfolders">${subfolders.map((node) =>
+          `<button type="button" class="reflections-folder" data-open-folder="${escHtml(node.path)}">${escHtml(node.name)}</button>`
+        ).join("")}</div>` : ""}
+        ${groups.map((group) => `
+          <h3 class="reflections-group">${escHtml(group.label)}</h3>
+          ${group.notes.map((note) => `
+            <button type="button" class="reflections-row ${note.path === currentPath ? "active" : ""}" data-path="${escHtml(note.path)}">
+              <strong>${escHtml(note.title || note.name || "未命名")}</strong>
+            </button>`).join("")}
+        `).join("")}
+        <div class="reflections-composer">
+          <textarea id="reflection-quick" rows="2" placeholder="写下来"></textarea>
+          <button type="button" id="reflection-publish">创建</button>
+        </div>
+        <div class="reflections-editor">
+          <input id="reflection-title" type="text" placeholder="标题" value="${escHtml(draft?.title || "")}">
+          <textarea id="reflection-body" placeholder="正文">${escHtml(draft?.body || "")}</textarea>
+          <div class="reflections-actions">
+            <button type="button" id="reflection-save">保存</button>
+            <button type="button" id="reflection-new">创建</button>
+            <button type="button" id="reflection-move">移动到…</button>
+            <button type="button" id="reflection-organize">按日期归夹</button>
+            <button type="button" id="reflection-delete">删除</button>
+          </div>
+        </div>
+      </div>`;
+    stage.querySelectorAll("[data-open-folder]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedFolder = button.dataset.openFolder || "";
+        expanded.add(folder.path);
+        renderFolders();
+        renderStage();
+      });
+    });
+    stage.querySelectorAll("[data-path]").forEach((button) => {
+      button.addEventListener("click", () => void openPath(button.dataset.path || ""));
+    });
+    const markDirty = () => { dirty = true; };
+    stage.querySelector("#reflection-title")?.addEventListener("input", markDirty);
+    stage.querySelector("#reflection-body")?.addEventListener("input", markDirty);
+    stage.querySelector("#reflection-title")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        stage.querySelector("#reflection-body")?.focus();
+      }
+    });
+    stage.querySelector("#reflection-save")?.addEventListener("click", () => void saveCurrent());
+    stage.querySelector("#reflection-new")?.addEventListener("click", () => beginNew());
+    stage.querySelector("#reflection-move")?.addEventListener("click", () => void moveCurrent());
+    stage.querySelector("#reflection-organize")?.addEventListener("click", () => void organizeCurrent());
+    stage.querySelector("#reflection-delete")?.addEventListener("click", () => void deleteCurrent());
+    stage.querySelector("#reflection-publish")?.addEventListener("click", () => void publishQuick());
+  }
+
+  function readForm() {
+    return {
+      title: document.getElementById("reflection-title")?.value ?? "",
+      body: document.getElementById("reflection-body")?.value ?? "",
+    };
   }
 
   async function openPath(filePath) {
@@ -130,65 +176,36 @@ export function createReflectionsFeature({ state, actions }) {
     currentPath = data.reflection.path;
     draft = { ...data.reflection };
     dirty = false;
-    renderList();
     renderStage();
     syncPreview();
   }
 
-  function renderStage() {
-    const panel = document.getElementById("document-panel");
-    if (!panel || state.workspace !== "reflections") return;
-    let stage = document.getElementById("reflections-stage");
-    if (!stage) {
-      stage = document.createElement("div");
-      stage.id = "reflections-stage";
-      panel.appendChild(stage);
-    }
-    if (!draft) {
-      stage.innerHTML = `<p class="empty-state-copy">选择或新建一篇心得</p>`;
-      return;
-    }
-    stage.innerHTML = `
-      <div class="reflections-editor">
-        <input id="reflection-title" type="text" placeholder="标题" value="${escHtml(draft.title || "")}">
-        <input id="reflection-occurred" type="text" placeholder="发生时刻（如 2026-10-28T11:28:28+08:00）" value="${escHtml(draft.occurredAt || "")}">
-        <input id="reflection-context" type="text" placeholder="情境（地点 / 事件）" value="${escHtml(draft.context || "")}">
-        <textarea id="reflection-body" placeholder="正文">${escHtml(draft.body || "")}</textarea>
-        <div class="reflections-actions">
-          <button type="button" id="reflection-save">保存</button>
-          <button type="button" id="reflection-move">移动到…</button>
-          <button type="button" id="reflection-organize">按日期归夹</button>
-          <button type="button" id="reflection-delete">删除</button>
-          <span class="reflections-path">${escHtml(draft.path || "")}</span>
-        </div>
-      </div>`;
-    const markDirty = () => { dirty = true; };
-    stage.querySelector("#reflection-title")?.addEventListener("input", markDirty);
-    stage.querySelector("#reflection-occurred")?.addEventListener("input", markDirty);
-    stage.querySelector("#reflection-context")?.addEventListener("input", markDirty);
-    stage.querySelector("#reflection-body")?.addEventListener("input", markDirty);
-    stage.querySelector("#reflection-save")?.addEventListener("click", () => void saveCurrent());
-    stage.querySelector("#reflection-move")?.addEventListener("click", () => void moveCurrent());
-    stage.querySelector("#reflection-organize")?.addEventListener("click", () => void organizeCurrent());
-    stage.querySelector("#reflection-delete")?.addEventListener("click", () => void deleteCurrent());
-  }
-
-  function readForm() {
-    return {
-      title: document.getElementById("reflection-title")?.value ?? "",
-      occurredAt: document.getElementById("reflection-occurred")?.value ?? "",
-      context: document.getElementById("reflection-context")?.value ?? "",
-      body: document.getElementById("reflection-body")?.value ?? "",
-    };
+  function beginNew() {
+    if (dirty && !window.confirm("当前心得未保存，新建将丢弃修改。继续？")) return;
+    currentPath = "";
+    draft = { title: "", body: "", folder: folderKey(selectedFolder) || "inbox" };
+    dirty = false;
+    renderStage();
+    syncPreview();
+    document.getElementById("reflection-title")?.focus();
   }
 
   async function saveCurrent() {
-    if (!draft?.path) return;
     const form = readForm();
-    const { response, data } = await requestJson("/api/reflections/content", jsonRequest("PUT", {
-      path: draft.path,
-      ...form,
-    }));
+    if (!form.title.trim()) {
+      actions.showError?.("标题不能为空");
+      return;
+    }
+    const creating = !draft?.path;
+    const { response, data } = await requestJson(
+      creating ? "/api/reflections" : "/api/reflections/content",
+      jsonRequest(creating ? "POST" : "PUT", {
+        ...form,
+        ...(creating
+          ? { folder: folderKey(selectedFolder) || "inbox" }
+          : { path: draft.path }),
+      }),
+    );
     if (!response.ok) {
       actions.showError?.(data.error || "保存失败");
       return;
@@ -196,7 +213,24 @@ export function createReflectionsFeature({ state, actions }) {
     draft = data.reflection;
     currentPath = draft.path;
     dirty = false;
-    await loadList(currentPath);
+    await loadTree();
+  }
+
+  async function publishQuick() {
+    const text = document.getElementById("reflection-quick")?.value || "";
+    if (!text.trim()) return;
+    const title = window.prompt("标题");
+    if (!title || !title.trim()) return;
+    const { response, data } = await requestJson("/api/reflections", jsonRequest("POST", {
+      title: title.trim(),
+      body: text,
+      folder: folderKey(selectedFolder) || "inbox",
+    }));
+    if (!response.ok) {
+      actions.showError?.(data.error || "创建失败");
+      return;
+    }
+    await loadTree();
   }
 
   async function deleteCurrent() {
@@ -209,7 +243,7 @@ export function createReflectionsFeature({ state, actions }) {
     dirty = false;
     currentPath = "";
     draft = null;
-    await loadList();
+    await loadTree();
   }
 
   async function moveCurrent() {
@@ -225,7 +259,9 @@ export function createReflectionsFeature({ state, actions }) {
       return;
     }
     dirty = false;
-    await loadList(data.reflection?.path);
+    currentPath = data.reflection?.path || "";
+    draft = data.reflection || null;
+    await loadTree();
   }
 
   async function organizeCurrent() {
@@ -236,31 +272,16 @@ export function createReflectionsFeature({ state, actions }) {
       return;
     }
     dirty = false;
-    await loadList(data.reflection?.path);
-  }
-
-  async function createBlank() {
-    if (dirty && !window.confirm("当前心得未保存，新建将丢弃修改。继续？")) return;
-    const title = window.prompt("标题", "未命名心得");
-    if (!title || !title.trim()) return;
-    const folder = filterFolder || "inbox";
-    const { response, data } = await requestJson("/api/reflections", jsonRequest("POST", {
-      title: title.trim(),
-      body: "",
-      folder,
-    }));
-    if (!response.ok) {
-      actions.showError?.(data.error || "创建失败");
-      return;
-    }
-    dirty = false;
-    await loadList(data.reflection?.path);
+    currentPath = data.reflection?.path || "";
+    draft = data.reflection || null;
+    selectedFolder = data.reflection?.path ? data.reflection.path.slice(0, data.reflection.path.lastIndexOf("/")) : selectedFolder;
+    await loadTree();
   }
 
   async function importPaste() {
     const text = window.prompt("粘贴记事本内容（标题\\n时间情境行\\n正文；多篇在下一篇标题前空一行）");
     if (text == null || !text.trim()) return;
-    await commitImport({ text, folder: filterFolder || "inbox" });
+    await commitImport({ text, folder: folderKey(selectedFolder) || "inbox" });
   }
 
   async function importFile() {
@@ -282,11 +303,11 @@ export function createReflectionsFeature({ state, actions }) {
     const preview = previewItems.map((item, index) =>
       `${index + 1}. ${item.title}${item.occurredAt ? ` @ ${item.occurredAt}` : ""}`
     ).join("\n");
-    if (!window.confirm(`将从该文件拆出 ${previewItems.length} 篇到 inbox：\n${preview}\n\n确认后写入，并可选择删除源文件。`)) return;
+    if (!window.confirm(`将从该文件拆出 ${previewItems.length} 篇：\n${preview}\n\n确认后写入。`)) return;
     const deleteSource = window.confirm("写入成功后删除源文件？");
     await commitImport({
       sourcePath: sourcePath.trim(),
-      folder: filterFolder || "inbox",
+      folder: folderKey(selectedFolder) || "inbox",
       deleteSource,
     });
   }
@@ -297,22 +318,22 @@ export function createReflectionsFeature({ state, actions }) {
       actions.showError?.(data.error || "导入失败");
       return;
     }
-    const created = data.reflections || [];
     dirty = false;
-    await loadList(created[created.length - 1]?.path);
+    await loadTree();
   }
 
   async function makeDir() {
-    const folder = window.prompt("新建文件夹（相对 reflections，如 散步随想）");
-    if (!folder || !folder.trim()) return;
-    const { response, data } = await requestJson("/api/reflections/mkdir", jsonRequest("POST", { folder: folder.trim() }));
+    const parent = folderKey(selectedFolder);
+    const name = window.prompt("新建文件夹");
+    if (!name || !name.trim()) return;
+    const folder = parent ? `${parent}/${name.trim()}` : name.trim();
+    const { response, data } = await requestJson("/api/reflections/mkdir", jsonRequest("POST", { folder }));
     if (!response.ok) {
       actions.showError?.(data.error || "创建失败");
       return;
     }
-    viewMode = "tree";
-    filterFolder = folder.trim().replace(/^inputs\/reflections\/?/, "");
-    await loadList(currentPath);
+    if (data.path) selectedFolder = data.path;
+    await loadTree();
   }
 
   function applyWorkspaceChrome(next) {
@@ -335,7 +356,7 @@ export function createReflectionsFeature({ state, actions }) {
     applyWorkspaceChrome(next);
     if (next === "reflections") {
       state.personThread = null;
-      void loadList(currentPath);
+      void loadTree();
     } else {
       syncPreview();
     }
@@ -348,6 +369,7 @@ export function createReflectionsFeature({ state, actions }) {
       syncPreview();
       return;
     }
+    renderFolders();
     renderStage();
     syncPreview();
   }
@@ -364,10 +386,50 @@ export function createReflectionsFeature({ state, actions }) {
   return { bind, remount, setWorkspace, applyWorkspaceChrome, canLeave };
 }
 
-function formatOccurred(value) {
-  if (!value) return "";
-  const matched = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(value);
-  if (matched) return `${matched[1]} ${matched[2]}`;
-  const cn = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return cn ? `${cn[1]}-${cn[2]}-${cn[3]}` : value;
+function groupNotes(notes) {
+  const now = new Date();
+  const buckets = new Map();
+  for (const note of notes) {
+    const label = groupLabel(note.updatedAt || note.occurredAt, now);
+    if (!buckets.has(label)) buckets.set(label, []);
+    buckets.get(label).push(note);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => groupRank(a[0]) - groupRank(b[0]))
+    .map(([label, items]) => ({
+      label,
+      notes: items.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))),
+    }));
+}
+
+function groupLabel(iso, now) {
+  const instant = new Date(iso || "");
+  if (Number.isNaN(instant.getTime())) return "更早";
+  const day = shanghaiDate(instant);
+  const today = shanghaiDate(now);
+  const delta = Math.round((today - day) / 86400000);
+  if (delta <= 0) return "今天";
+  if (delta === 1) return "昨天";
+  if (delta <= 7) return "前 7 天";
+  if (delta <= 30) return "前 30 天";
+  return String(shanghaiParts(instant).year);
+}
+
+function groupRank(label) {
+  if (label === "今天") return 0;
+  if (label === "昨天") return 1;
+  if (label === "前 7 天") return 2;
+  if (label === "前 30 天") return 3;
+  const year = Number(label);
+  return Number.isFinite(year) ? 10000 - year : 100000;
+}
+
+function shanghaiParts(instant) {
+  const shifted = new Date(instant.getTime() + 8 * 60 * 60 * 1000);
+  return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth(), day: shifted.getUTCDate() };
+}
+
+function shanghaiDate(instant) {
+  const parts = shanghaiParts(instant);
+  return Date.UTC(parts.year, parts.month, parts.day);
 }

@@ -19,6 +19,10 @@ FROM ${NODE_IMAGE}
 ARG NODE_IMAGE
 WORKDIR /app
 ENV NODE_ENV=production
+ARG AICLAW_BUILD=dev
+ARG AICLAW_COMMIT=
+ENV AICLAW_BUILD=${AICLAW_BUILD}
+ENV AICLAW_COMMIT=${AICLAW_COMMIT}
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN pnpm config set registry "$NPM_REGISTRY"

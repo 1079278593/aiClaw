@@ -480,6 +480,11 @@ input:focus-visible {
 .settings-logout[hidden] {
   display: none;
 }
+.settings-version {
+  padding: 8px var(--space-3) 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
 #account-modal {
   position: static;
   display: none;

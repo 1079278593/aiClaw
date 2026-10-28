@@ -192,6 +192,12 @@ async function readMetaFromFile(absolutePath: string, relativePath: string): Pro
   };
 }
 
+function fileCreatedAt(st: { birthtime: Date; mtime: Date }): string {
+  const birth = st.birthtime?.getTime?.() ?? 0;
+  if (Number.isFinite(birth) && birth > 0) return st.birthtime.toISOString();
+  return st.mtime.toISOString();
+}
+
 export async function listReflections(options: { q?: string; userDataDir?: string } = {}): Promise<ReflectionMeta[]> {
   await ensureReflectionsDirs(options.userDataDir);
   const root = reflectionsRoot(options.userDataDir);
@@ -318,13 +324,14 @@ export async function updateReflection(input: {
   const current = await readReflection(input.path, input.userDataDir);
   const { absolutePath, relativePath } = resolveReflectionPath(input.path, input.userDataDir);
   const now = new Date().toISOString();
+  const st = await stat(absolutePath);
   const title = input.title !== undefined ? String(input.title).trim() : current.title;
   if (!title) throw new ReflectionsError("标题不能为空", 400);
   const content = serializeDoc({
     title,
     occurredAt: input.occurredAt !== undefined ? String(input.occurredAt).trim() || current.occurredAt : current.occurredAt,
     context: input.context !== undefined ? String(input.context).trim() : current.context,
-    createdAt: current.createdAt || now,
+    createdAt: current.createdAt || fileCreatedAt(st),
     updatedAt: now,
     body: input.body !== undefined ? String(input.body) : current.body,
   });
@@ -358,6 +365,8 @@ export type ReflectionTreeNode = {
   kind: "directory" | "file";
   title?: string;
   occurredAt?: string;
+  updatedAt?: string;
+  createdAt?: string;
   context?: string;
   children?: ReflectionTreeNode[];
 };
@@ -392,6 +401,8 @@ async function buildTree(absDir: string, relDir: string, userDataDir?: string): 
         kind: "file",
         title: meta.title,
         occurredAt: meta.occurredAt,
+        updatedAt: meta.updatedAt,
+        createdAt: meta.createdAt,
         context: meta.context,
       });
     } catch {
@@ -400,7 +411,8 @@ async function buildTree(absDir: string, relDir: string, userDataDir?: string): 
   }
   nodes.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
-    return a.name.localeCompare(b.name, "zh-CN");
+    if (a.kind === "directory") return a.name.localeCompare(b.name, "zh-CN");
+    return (b.updatedAt || "").localeCompare(a.updatedAt || "") || a.name.localeCompare(b.name, "zh-CN");
   });
   return nodes;
 }

@@ -133,7 +133,7 @@ if [[ "$USE_CN_MIRRORS" -eq 1 ]]; then
   base_image="$NODE_IMAGE_CN"
 fi
 
-cmd=(docker build --build-arg "NODE_IMAGE=${base_image}" --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" -t "$IMAGE_NAME" -f "${ROOT}/server/Dockerfile")
+cmd=(docker build --build-arg "NODE_IMAGE=${base_image}" --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" --build-arg "AICLAW_BUILD=${n}" --build-arg "AICLAW_COMMIT=${commit}" -t "$IMAGE_NAME" -f "${ROOT}/server/Dockerfile")
 if [[ -n "$PLATFORM" ]]; then
   cmd+=(--platform "$PLATFORM")
 fi

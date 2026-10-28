@@ -34,7 +34,7 @@
 
 ## HTTP
 
-- 公开：`GET /health` → `{ "status": "ok", "authRequired": boolean }`（不含密钥）
+- 公开：`GET /health` → `{ "status": "ok", "authRequired": boolean, "version": string, "commit": string }`（不含密钥）。`version` 是 NAS 发版号，`commit` 是构建时的 git 短哈希。本地直接启动时 `version` 为 `dev`、`commit` 为空。
 - 受保护：`/api/*` 需 `Authorization: Bearer <accessToken>`（当 `authRequired` 为 true）
 - 静态资源（`/`、`/js/*`、`/styles/*` 等）可匿名访问
 - 鉴权失败：`401` + `{ "error": "Unauthorized" }`

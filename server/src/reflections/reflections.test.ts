@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -147,5 +147,31 @@ describe("reflections store", () => {
     const names = tree.map((node) => node.name);
     expect(names).toContain("2026");
     expect(names).toContain("inbox");
+  });
+
+  it("keeps createdAt when the note is edited and when its folder is renamed", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "甲",
+      body: "原文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const updated = await updateReflection({
+      path: created.path,
+      title: "甲改",
+      body: "新正文",
+      userDataDir: dir,
+    });
+    expect(updated.createdAt).toBe(created.createdAt);
+    expect(updated.updatedAt! > created.updatedAt!).toBe(true);
+
+    const folder = path.join(dir, "inputs", "reflections", "inbox");
+    const renamed = path.join(dir, "inputs", "reflections", "改名");
+    await rename(folder, renamed);
+    const doc = await readReflection("inputs/reflections/改名/甲.md", dir);
+    expect(doc.createdAt).toBe(created.createdAt);
+    expect(doc.updatedAt).toBe(updated.updatedAt);
   });
 });

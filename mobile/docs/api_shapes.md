@@ -15,6 +15,15 @@ HTTP 失败时读 JSON 的 `error` 字符串。401 回到连接页。下文成�
 | `defaultProvider` / `defaultModel` / `defaultThinkingEffort` | 会话没有 last* 时的默认值 |
 | `triliumEnabled` | 为 true 时文档根增加 `trilium` |
 | `authRequired` | 与 `/health` 相同含义 |
+
+`GET /health` 公开，不带令牌：
+
+| 字段 | 用途 |
+|---|---|
+| `status` | `"ok"` |
+| `authRequired` | 为 true 时连接页必须填写 access token |
+| `version` | 服务发版号。NAS 镜像是 `deploy/build.number`；本地直接启动是 `dev` |
+| `commit` | 构建该镜像时的 git 短哈希。没有则为空字符串 |
 | `accountId` | 当前登录的账号 id，例如 `default`。没有租户上下文时为空字符串 |
 | `gitSyncEnabled` | 手机不使用 |
 
@@ -201,14 +210,15 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 ## 8. 心得 reflections
 
-根目录：`inputs/reflections/`（默认快记 `inbox/`）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。
+根目录：`inputs/reflections/`。首页是文件夹。进入文件夹后才列出该层笔记，按 `updatedAt` 在客户端分成今天、昨天、前 7 天、前 30 天，更早按年份（东八区）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。保存更新 `updatedAt`，不改已有 `createdAt`。
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/reflections?q=` | 扫树扁平列表，按 `occurredAt` 降序。`view=tree` 时返回目录树 |
+| `GET /api/reflections?view=tree` | 目录树。文件节点带 `updatedAt`。心得首页用这个，不用扁平时间序 |
+| `GET /api/reflections?q=` | 扫树扁平列表，按 `occurredAt` 降序。心得首页不再调用 |
 | `POST /api/reflections` | `{ title, body?, occurredAt?, context?, folder? }`，默认 `folder=inbox` |
 | `GET /api/reflections/content?path=` | 单篇 |
-| `PUT /api/reflections/content` | 按 path 更新；`.txt` 首次保存转为 `.md` |
+| `PUT /api/reflections/content` | 按 path 更新标题和正文；省略的发生时刻、情境保持原值。`.txt` 首次保存转为 `.md` |
 | `DELETE /api/reflections?path=` | 删除 |
 | `POST /api/reflections/parse` | 只解析记事本粘贴，不写盘 |
 | `POST /api/reflections/import` | `{ text?\|sourcePath?, folder?, dryRun?, deleteSource? }` 拆篇写入 |

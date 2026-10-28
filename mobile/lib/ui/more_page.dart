@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
@@ -78,11 +79,66 @@ class MorePage extends StatelessWidget {
                   builder: (_) => UsagePage(controller: controller),
                 )),
               ),
+              _VersionSection(controller: controller),
               ListTile(title: const Text('退出并清除令牌'), onTap: controller.logout),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+class _VersionSection extends StatefulWidget {
+  const _VersionSection({required this.controller});
+  final AppController controller;
+
+  @override
+  State<_VersionSection> createState() => _VersionSectionState();
+}
+
+class _VersionSectionState extends State<_VersionSection> {
+  String _app = '…';
+  String _server = '…';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    var app = '未知';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      app = '${info.version} (${info.buildNumber})';
+    } catch (_) {}
+    var server = '未知';
+    final base = widget.controller.baseUrl;
+    if (base.isNotEmpty) {
+      try {
+        final health = await widget.controller.api.getJson(apiUri(base, '/health'));
+        final version = health['version'];
+        final commit = health['commit'];
+        if (version is String && version.isNotEmpty) {
+          server = commit is String && commit.isNotEmpty ? '$version · $commit' : version;
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _app = app;
+      _server = server;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        ListTile(title: const Text('App'), subtitle: Text(_app)),
+        ListTile(title: const Text('服务'), subtitle: Text(_server)),
+      ],
     );
   }
 }
