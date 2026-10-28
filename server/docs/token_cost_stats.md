@@ -241,7 +241,7 @@ interface DailyUsage {
 
 - 接口：`GET /api/usage/stats`
 - 数据源：`usage_total.json` + 未归档 temp
-- 表格列：模型、提供商、总缓存输入（`cachedReadTokens + cachedWriteTokens`）、总未缓存输入（`inputTokens` 减缓存，两者相加 = 总输入）、总输出（`billingOutputTokens`，含 thinking）、总费用
+- 表格列：模型、提供商、总缓存输入（`cachedReadTokens + cachedWriteTokens`）、总未缓存输入（`inputTokens` 减缓存，两者相加 = 总输入）、总输出（`billingOutputTokens`，含 thinking）、总费用、费用/百万token（总费用 ÷ (总输入 + 总输出) × 1,000,000）
 - 按模型 × 供应商展示累计
 
 ### 「按时间」tab

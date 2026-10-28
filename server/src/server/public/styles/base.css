@@ -137,6 +137,21 @@
       transition: background 0.3s;
     }
 
+    #speed-display {
+      font-size: 12px;
+      color: var(--text2);
+      white-space: nowrap;
+      display: none;
+      line-height: 1;
+      padding: 4px 2px;
+      border-radius: 6px;
+      transition: opacity 0.4s;
+    }
+
+    #speed-display.speed-stale {
+      opacity: 0.45;
+    }
+
 
     #chat-actions {
       display: flex;

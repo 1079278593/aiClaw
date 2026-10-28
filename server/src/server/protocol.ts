@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 import type { ProviderName } from "../config/index.js";
+import type { TokenSpeedSnapshot } from "../chat/speed.js";
 import type { NormalizedUsage } from "../llm/types.js";
 import type { Message } from "../types/index.js";
 
@@ -56,7 +57,26 @@ export type ServerMessage =
   | { type: "chatStart"; sessionId: string; runId: string; sequence: number; userMessageId?: string }
   | { type: "chatChunk"; sessionId: string; runId: string; sequence: number; chunk: string }
   | { type: "chatReasoning"; sessionId: string; runId: string; sequence: number; chunk: string }
-  | { type: "chatEnd"; sessionId: string; runId: string; sequence: number; fullResponse: string; usage?: UsageSummary; contextUsage?: UsageSummary }
+  | {
+      type: "chatEnd";
+      sessionId: string;
+      runId: string;
+      sequence: number;
+      fullResponse: string;
+      usage?: UsageSummary;
+      contextUsage?: UsageSummary;
+      tokenSpeed?: TokenSpeedSnapshot;
+    }
+  | {
+      type: "chatSpeed";
+      sessionId: string;
+      runId: string;
+      sequence: number;
+      tokensPerSecond: number;
+      totalTokens: number;
+      elapsedMs: number;
+      ts: number;
+    }
   | { type: "chatCancelled"; sessionId: string; runId: string; sequence: number; fullResponse: string }
   | { type: "toolCall"; sessionId: string; runId: string; sequence: number; name: string; input: Record<string, unknown>; callId: string }
   | { type: "toolResult"; sessionId: string; runId: string; sequence: number; name: string; content: string; isError: boolean; callId: string }

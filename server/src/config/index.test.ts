@@ -89,15 +89,16 @@ describe("config", () => {
     expect(config.tools.trilium).toMatchObject({
       enabled: false,
       baseUrl: "http://127.0.0.1:8080",
-      token: "",
       ancestorNoteId: "",
       timeoutMs: 15_000,
     });
+    expect(typeof config.tools.trilium.token).toBe("string");
+    expect(config.providers.commandcode?.baseUrl).toBe("https://api.commandcode.ai/provider/v1");
 
-    expect(saved).not.toHaveProperty("server");
-    expect(saved).not.toHaveProperty("fs");
+    // 模板可含 server/fs；init 按模板落盘，不强制剔除
     expect(saved).not.toHaveProperty("session");
     expect(saved).toHaveProperty("providers");
+    expect(saved.providers).toHaveProperty("commandcode");
     expect(saved).toHaveProperty("defaultThinkingEffort", "high");
     await expect(access(path.join(testDir, "files", "commands.md"))).resolves.toBeUndefined();
     await expect(access(path.join(testDir, "files", "project_operation_manual.md"))).resolves.toBeUndefined();

@@ -1,14 +1,44 @@
 import { renderContent } from "../markdown.js";
+import { openImagePreview } from "./image-preview.js";
 
 const USER_MESSAGE_COLLAPSE_THRESHOLD = 400;
 const USER_MESSAGE_COLLAPSE_LINE_THRESHOLD = 5;
+const USER_CONTEXT_PATTERN = /^<系统提示>\n([\s\S]*?)\n<\/系统提示>\n用户消息：([\s\S]*)$/;
+const PREVIEW_PATH_PATTERN = /^当前用户正在浏览文件：(.*)$/m;
+const SELECTION_BLOCK_START = "选中内容：\n```text\n";
+const SELECTION_LINE_HINT_PATTERN = /^已选中源文件第\s*\d+\s*行到第\s*\d+\s*行：\n?/;
+
+/** 拆分持久化用户消息里的 <系统提示> 前缀，返回真正展示的文本与引用信息。 */
+export function parseUserMessageContent(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n");
+  const match = USER_CONTEXT_PATTERN.exec(normalized);
+  if (!match) return { text: normalized, previewPath: "", selectedText: "" };
+
+  const block = match[1];
+  const pathMatch = PREVIEW_PATH_PATTERN.exec(block);
+  let selectedText = "";
+  const startIndex = block.indexOf(SELECTION_BLOCK_START);
+  if (startIndex !== -1) {
+    const contentStart = startIndex + SELECTION_BLOCK_START.length;
+    // 选中内容里可能本身带 ``` 代码块，从末尾找外层的结束围栏
+    const endIndex = block.lastIndexOf("\n```");
+    if (endIndex >= contentStart) selectedText = block.slice(contentStart, endIndex);
+  }
+
+  return {
+    text: match[2],
+    previewPath: pathMatch ? pathMatch[1].trim() : "",
+    selectedText: selectedText.replace(SELECTION_LINE_HINT_PATTERN, ""),
+  };
+}
 
 export function createMessageRenderer({ state, streaming, onRestart, scrollToBottom }) {
   function renderMessages(messages) {
     if (!state.messagesEl) return;
     state.messagesEl.classList.remove("round-anchor-active");
     if (!messages.length) {
-      state.messagesEl.innerHTML = '<div id="empty-state" class="empty-state"><div class="empty-state-icon"><i data-lucide="message-circle"></i></div><p class="empty-state-title">发送消息开始对话</p></div>';
+      state.messagesEl.innerHTML =
+        '<div id="empty-state" class="empty-state"><div class="empty-state-icon"><i data-lucide="message-circle"></i></div><p class="empty-state-title">发送消息开始对话</p></div>';
       window.lucide?.createIcons();
       return;
     }
@@ -127,7 +157,7 @@ export function createMessageRenderer({ state, streaming, onRestart, scrollToBot
     else bubble.appendChild(details);
   }
 
-  function appendMessage(role, content, messageId, { scroll = true } = {}) {
+  function appendMessage(role, content, messageId, { scroll = true, reference } = {}) {
     if (!state.messagesEl) return null;
     state.messagesEl.querySelector("#empty-state")?.remove();
     const message = document.createElement("div");
@@ -139,7 +169,9 @@ export function createMessageRenderer({ state, streaming, onRestart, scrollToBot
     contentDiv.className = "message-content";
     const renderedText = role === "user" ? formatUserMessageContent(content) : formatMessageContent(content);
     contentDiv.dataset.raw = renderedText;
-    if (role === "assistant" && typeof content === "string" && content) {
+    if (role === "user" && Array.isArray(content)) {
+      appendUserMessageParts(contentDiv, content);
+    } else if (role === "assistant" && typeof content === "string" && content) {
       contentDiv.classList.add("markdown-body");
       renderContent(contentDiv, renderedText);
     } else {
@@ -163,6 +195,10 @@ export function createMessageRenderer({ state, streaming, onRestart, scrollToBot
       message.appendChild(restart);
     }
     message.appendChild(bubble);
+    if (role === "user") {
+      const referenceData = reference === undefined ? getUserReference(content) : normalizeUserReference(reference);
+      if (referenceData) appendUserReference(bubble, referenceData);
+    }
     state.messagesEl.appendChild(message);
     if (scroll) scrollToBottom();
     window.lucide?.createIcons();
@@ -182,10 +218,46 @@ export function buildUserMessageContent(text, images) {
   return parts;
 }
 
+/** 用户消息（含图片）按内容分支构建 DOM：文本段 + 可点击预览的缩略图。
+    连续图片归入同一个横向 flex 行（.message-image-row），多图不竖向堆叠。 */
+function appendUserMessageParts(contentDiv, parts) {
+  let imageRow = null;
+  for (const part of parts) {
+    if (part.type === "text" && part.text) {
+      imageRow = null;
+      const textEl = document.createElement("div");
+      textEl.className = "user-message-text";
+      textEl.textContent = extractDisplayUserText(part.text);
+      contentDiv.appendChild(textEl);
+    } else if (part.type === "image_url" && part.image_url?.url) {
+      if (!imageRow) {
+        imageRow = document.createElement("div");
+        imageRow.className = "message-image-row";
+        contentDiv.appendChild(imageRow);
+      }
+      imageRow.appendChild(createImageThumb(part.image_url.url, part.image_url.path));
+    }
+  }
+}
+
+function createImageThumb(url, path) {
+  const img = document.createElement("img");
+  img.className = "message-image-thumb";
+  img.src = url;
+  img.alt = path || "clipboard:image.png";
+  img.title = path || "clipboard:image.png";
+  img.loading = "lazy";
+  img.addEventListener("click", () => openImagePreview(url, path));
+  return img;
+}
+
 export function extractUserText(content) {
   if (typeof content === "string") return extractDisplayUserText(content);
   if (!Array.isArray(content)) return "";
-  return content.filter((part) => part.type === "text").map((part) => extractDisplayUserText(part.text)).join("\n");
+  return content
+    .filter((part) => part.type === "text")
+    .map((part) => extractDisplayUserText(part.text))
+    .join("\n");
 }
 
 function formatMessageContent(content) {
@@ -202,21 +274,103 @@ function formatMessageContent(content) {
 function formatUserMessageContent(content) {
   if (typeof content === "string") return extractDisplayUserText(content);
   if (!Array.isArray(content)) return "";
-  return formatMessageContent(content.map((part) =>
-    part.type === "text" && part.text ? { ...part, text: extractDisplayUserText(part.text) } : part,
-  ));
+  return formatMessageContent(
+    content.map((part) =>
+      part.type === "text" && part.text ? { ...part, text: extractDisplayUserText(part.text) } : part,
+    ),
+  );
 }
 
 function extractDisplayUserText(text) {
-  const normalized = String(text || "").replace(/\r\n/g, "\n");
-  const match = /^<系统提示>\n[\s\S]*?\n<\/系统提示>\n用户消息：([\s\S]*)$/.exec(normalized);
-  return match ? match[1] : normalized;
+  return parseUserMessageContent(text).text;
+}
+
+function getUserReference(content) {
+  if (typeof content === "string") {
+    const parsed = parseUserMessageContent(content);
+    return parsed.previewPath || parsed.selectedText ? parsed : null;
+  }
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    if (part?.type !== "text" || !part.text) continue;
+    const parsed = parseUserMessageContent(part.text);
+    if (parsed.previewPath || parsed.selectedText) return parsed;
+  }
+  return null;
+}
+
+function normalizeUserReference(reference) {
+  if (!reference || typeof reference !== "object") return null;
+  const previewPath = String(reference.previewPath || "").trim();
+  const selectedText = String(reference.selectedText ?? reference.selectedPreviewText ?? "").replace(
+    SELECTION_LINE_HINT_PATTERN,
+    "",
+  );
+  if (!previewPath && !selectedText.trim()) return null;
+  return { previewPath, selectedText };
+}
+
+function appendUserReference(bubble, reference) {
+  const wrap = document.createElement("div");
+  wrap.className = "message-reference";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "message-reference-toggle";
+  toggle.title = "查看引用内容";
+  toggle.setAttribute("aria-label", "查看引用内容");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = '<i data-lucide="chevron-right"></i>';
+
+  const panel = document.createElement("div");
+  panel.className = "message-reference-panel";
+  panel.hidden = true;
+
+  if (reference.previewPath) {
+    const row = document.createElement("div");
+    row.className = "message-reference-row";
+    const label = document.createElement("span");
+    label.className = "message-reference-label";
+    label.textContent = "引用文件：";
+    const path = document.createElement("span");
+    path.className = "message-reference-path";
+    path.textContent = reference.previewPath;
+    row.append(label, path);
+    panel.appendChild(row);
+  }
+
+  if (reference.selectedText.trim()) {
+    const row = document.createElement("div");
+    row.className = "message-reference-row";
+    const label = document.createElement("span");
+    label.className = "message-reference-label";
+    label.textContent = "引用文字：";
+    const text = document.createElement("pre");
+    text.className = "message-reference-text";
+    text.textContent = reference.selectedText;
+    row.append(label, text);
+    panel.appendChild(row);
+  }
+
+  toggle.addEventListener("click", () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.classList.toggle("is-open", open);
+    toggle.title = open ? "收起引用内容" : "查看引用内容";
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+
+  wrap.append(toggle, panel);
+  bubble.appendChild(wrap);
 }
 
 function shouldCollapseUserMessage(content) {
   const text = extractUserText(content);
-  return Array.from(text).length > USER_MESSAGE_COLLAPSE_THRESHOLD
-    || text.split(/\r?\n/).length > USER_MESSAGE_COLLAPSE_LINE_THRESHOLD;
+  return (
+    Array.from(text).length > USER_MESSAGE_COLLAPSE_THRESHOLD ||
+    text.split(/\r?\n/).length > USER_MESSAGE_COLLAPSE_LINE_THRESHOLD
+  );
 }
 
 function appendUserMessageToggle(bubble, contentDiv) {

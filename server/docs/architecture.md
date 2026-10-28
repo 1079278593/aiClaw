@@ -228,7 +228,7 @@ Server → Client:
 
 ### 3.9 Config (`src/config/`)
 - **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `maxToolCalls`, `server` (port/host), `fs` (allowedDirs/allowedFiles), `tools` (tavily, trilium), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
-- **Supported providers**: `zai` (智谱), `dashscope` (阿里百炼)
+- **Supported providers**: `zai` (智谱), `dashscope` (阿里百炼), `deepseek`, `commandcode`
 - **Thinking levels**: the UI always adds `none`; each model's `thinking` list supplies provider-native values (for example, DeepSeek `high` / `max`). `none` is sent explicitly as that provider's disable parameter.
 - **`$AICLAW_DATA_DIR`** must be set via `.env` file, no default fallback
 

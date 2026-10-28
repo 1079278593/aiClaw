@@ -138,6 +138,18 @@ describe("edit tool", () => {
     expect(readResult.content).toBe("baz bar foo");
   });
 
+  it("preserves $$ and $ special sequences in new_string", async () => {
+    await getTool("write").execute({ path: "inputs/edit-dollar.txt", content: "FORMULA_PLACEHOLDER" });
+    const result = await getTool("edit").execute({
+      path: "inputs/edit-dollar.txt",
+      old_string: "FORMULA_PLACEHOLDER",
+      new_string: "$$ x = 1 $$ | $& | $' | $` | $1",
+    });
+    expect(result.isError).toBeUndefined();
+    const readResult = await getTool("read").execute({ path: "inputs/edit-dollar.txt" });
+    expect(readResult.content).toBe("$$ x = 1 $$ | $& | $' | $` | $1");
+  });
+
   it("returns error when old_string not found", async () => {
     await getTool("write").execute({ path: "inputs/edit2.txt", content: "hello" });
     const result = await getTool("edit").execute({ path: "inputs/edit2.txt", old_string: "nothere", new_string: "x" });
@@ -183,6 +195,79 @@ describe("search tool", () => {
     const result = await getTool("grep").execute({ pattern: "notfound" });
     expect(result.isError).toBeUndefined();
     expect(result.content).toContain('No matches found for "notfound"');
+  });
+
+  it("searches with regex by default (no flag needed)", async () => {
+    await getTool("write").execute({ path: "inputs/r.txt", content: "营业收入 100\n净利润 50\n毛利润 30" });
+
+    const result = await getTool("grep").execute({ pattern: "净利润|毛利" });
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("2: 净利润 50");
+    expect(result.content).toContain("3: 毛利润 30");
+    expect(result.content).not.toContain("营业收入");
+  });
+
+  it("supports anchors, character classes and case-insensitivity by default", async () => {
+    await getTool("write").execute({ path: "inputs/re.txt", content: "ERROR: disk full\nno error here\nError: panic" });
+
+    const anchored = await getTool("grep").execute({ pattern: "^error", path: "inputs/re.txt" });
+    expect(anchored.content).toContain("1: ERROR: disk full");
+    expect(anchored.content).toContain("3: Error: panic");
+    expect(anchored.content).not.toContain("no error here");
+  });
+
+  it("treats the pattern as regex by default", async () => {
+    await getTool("write").execute({ path: "inputs/lit.txt", content: "a.b\naxb" });
+
+    const result = await getTool("grep").execute({ pattern: "a.b", path: "inputs/lit.txt" });
+    expect(result.content).toContain("1: a.b");
+    expect(result.content).toContain("2: axb");
+  });
+
+  it("literal: true searches raw text without metacharacter semantics", async () => {
+    await getTool("write").execute({ path: "inputs/lit.txt", content: "a.b\naxb\n营收(亿元) 100" });
+
+    const dot = await getTool("grep").execute({ pattern: "a.b", path: "inputs/lit.txt", literal: true });
+    expect(dot.content).toContain("1: a.b");
+    expect(dot.content).not.toContain("axb");
+
+    const paren = await getTool("grep").execute({ pattern: "营收(亿元)", path: "inputs/lit.txt", literal: true });
+    expect(paren.content).toContain("3: 营收(亿元) 100");
+  });
+
+  it("keeps regex: false working as a literal alias", async () => {
+    await getTool("write").execute({ path: "inputs/lit.txt", content: "a.b\naxb" });
+
+    const pipe = await getTool("grep").execute({ pattern: "x|y", regex: false });
+    expect(pipe.content).toContain("No matches found");
+
+    const literal = await getTool("grep").execute({ pattern: "a.b", path: "inputs/lit.txt", regex: false });
+    expect(literal.content).toContain("1: a.b");
+    expect(literal.content).not.toContain("axb");
+  });
+
+  it("returns error for invalid regex when regex: true is explicit", async () => {
+    const result = await getTool("grep").execute({ pattern: "营收(", regex: true });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Invalid regex pattern");
+  });
+
+  it("falls back to literal search when an implicit regex cannot compile", async () => {
+    await getTool("write").execute({ path: "inputs/fb.txt", content: "营收(亿元) 100\n净利润 50" });
+
+    const result = await getTool("grep").execute({ pattern: "营收(", path: "inputs/fb.txt" });
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("已按字面量搜索");
+    expect(result.content).toContain("1: 营收(亿元) 100");
+  });
+
+  it("hints literal: true when a metacharacter pattern finds nothing", async () => {
+    await getTool("write").execute({ path: "inputs/hint.txt", content: "净利润 50" });
+
+    const result = await getTool("grep").execute({ pattern: "营收|毛利(亿元)", path: "inputs/hint.txt" });
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("No matches found");
+    expect(result.content).toContain("literal: true");
   });
 });
 

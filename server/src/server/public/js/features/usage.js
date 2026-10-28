@@ -71,6 +71,14 @@ function renderChart(containerId, legendId, data, groupKey, totalKey, formatFn, 
       return `<span class="usage-legend-item"><span class="usage-legend-swatch" style="background:${colors[key]}"></span>${escHtml(key)}<span style="margin-left:12px">${formatFn(count)}</span></span>`;
     }).join("") + `<span class="usage-legend-sep"></span><span class="usage-legend-item usage-legend-total"><span class="usage-legend-swatch usage-legend-total-swatch"></span>合计<span style="margin-left:12px">${formatFn(total)}</span></span>`;
   };
+  // 合计是各天模型的并集，行数一定不少于任意一天；把合计渲染后的高度锁成
+  // min-height，悬停时图例只会在锁定高度内变短，不再带动面板上下跳。
+  const showTotalsLegend = () => {
+    legend.style.minHeight = "";
+    renderLegend(totals);
+    const height = legend.getBoundingClientRect().height;
+    legend.style.minHeight = height > 0 ? `${height}px` : "";
+  };
 
   for (const entry of data) {
     const group = document.createElement("div");
@@ -89,15 +97,16 @@ function renderChart(containerId, legendId, data, groupKey, totalKey, formatFn, 
       group.appendChild(segment);
     }
     group.addEventListener("mouseenter", () => renderLegend(values));
-    group.addEventListener("mouseleave", () => renderLegend(totals));
     const dateLabel = document.createElement("div");
     dateLabel.className = "usage-chart-bar-label";
     dateLabel.textContent = entry.date.slice(5);
     group.appendChild(dateLabel);
     chart.appendChild(group);
   }
+  // mouseleave 挂在整个图表上：柱间移动（A 天→B 天）不会先闪一下合计
+  chart.addEventListener("mouseleave", showTotalsLegend);
   wrapper.appendChild(chart);
-  renderLegend(totals);
+  showTotalsLegend();
 }
 
 function padDateRange(apiData, days) {
@@ -138,6 +147,17 @@ function renderUsageDailyCharts() {
   const formatFn = isCost ? formatCost : formatTokens;
   renderChart("usage-chart-model", "usage-legend-model", cachedDailyData, groupKey, totalKey, formatFn, isCost);
   renderChart("usage-chart-provider", "usage-legend-provider", cachedDailyData, providerGroupKey, totalKey, formatFn, isCost);
+}
+
+// 窗口宽度变化会改变图例换行，重新渲染以重算锁定的高度（仅弹窗打开且停留在每日页时）
+let usageResizeFrame = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", () => {
+    if (activeUsageTab !== "daily") return;
+    if (!document.getElementById("usage-modal")?.classList.contains("open")) return;
+    cancelAnimationFrame(usageResizeFrame);
+    usageResizeFrame = requestAnimationFrame(() => renderUsageDailyCharts());
+  });
 }
 
 function showEmptyLoading(el) {
@@ -182,16 +202,21 @@ async function loadUsageTotal() {
     summary.cost += Number(row.cost) || 0;
     return summary;
   }, { cachedInput: 0, uncachedInput: 0, billingOutputTokens: 0, cost: 0 });
+  // 费用/百万token = 总费用 ÷ (总输入 + 总输出) × 1,000,000，无 token 时记 0
+  const costPerMillion = (cost, tokens) => (tokens > 0 ? Number(((cost / tokens) * 1_000_000).toFixed(2)) : 0);
   body.innerHTML = rows.map((row) => {
     const { cached, uncached } = splitInput(row);
+    const output = Number(row.billingOutputTokens ?? row.outputTokens) || 0;
+    const cost = Number(row.cost) || 0;
     return `
     <tr>
       <td>${escHtml(row.model || "")}</td>
       <td>${escHtml(row.provider || "")}</td>
       <td>${formatTokens(cached)}</td>
       <td>${formatTokens(uncached)}</td>
-      <td>${formatTokens(row.billingOutputTokens ?? row.outputTokens)}</td>
-      <td>${formatCost(row.cost)}</td>
+      <td>${formatTokens(output)}</td>
+      <td>${formatCost(cost)}</td>
+      <td>${formatCost(costPerMillion(cost, cached + uncached + output))}</td>
     </tr>
   `;
   }).join("");
@@ -202,6 +227,7 @@ async function loadUsageTotal() {
       <td>${formatTokens(totals.uncachedInput)}</td>
       <td>${formatTokens(totals.billingOutputTokens)}</td>
       <td>${formatCost(totals.cost)}</td>
+      <td>${formatCost(costPerMillion(totals.cost, totals.cachedInput + totals.uncachedInput + totals.billingOutputTokens))}</td>
     </tr>
   `;
   empty.style.display = "none";

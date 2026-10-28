@@ -13,6 +13,7 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
   deepseek: "DeepSeek",
   dashscope: "千问",
   zai: "智谱",
+  commandcode: "Command Code",
 };
 
 export type AccountSettingsView = {

@@ -14,7 +14,7 @@ type ListInput = { path: string };
 type ReadInput = { path: string; offset?: number; limit?: number };
 type WriteInput = { path: string; content: string };
 type EditInput = { path: string; old_string: string; new_string: string };
-type GrepInput = { pattern: string; path?: string };
+type GrepInput = { pattern: string; path?: string; literal?: boolean; regex?: boolean };
 type MoveInput = { path: string; new_path: string };
 type DeleteInput = { path: string };
 type FilePolicy = { allowedDirs: string[]; allowedFiles: string[] };
@@ -243,7 +243,9 @@ function makeEditTool(policy: FilePolicy): ToolDefinition<EditInput> {
 
         // Try exact match first
         if (original.includes(input.old_string)) {
-          const updated = original.replace(input.old_string, input.new_string);
+          // 用函数形式替换：字符串替换串会被解释特殊模式（$$ → $、$& → 匹配文本等），
+          // 导致 new_string 中的 $$（如 LaTeX 公式）被静默折叠。
+          const updated = original.replace(input.old_string, () => input.new_string);
           await fs.writeFile(resolved, updated, "utf-8");
           return { content: `Edited ${input.path}` };
         }
@@ -253,7 +255,8 @@ function makeEditTool(policy: FilePolicy): ToolDefinition<EditInput> {
         const normalizedOld = input.old_string.replace(/\r\n/g, "\n");
         if (normalized.includes(normalizedOld)) {
           const normalizedNew = input.new_string.replace(/\r\n/g, "\n");
-          const updated = normalized.replace(normalizedOld, normalizedNew);
+          // 函数形式替换，理由同上
+          const updated = normalized.replace(normalizedOld, () => normalizedNew);
           await fs.writeFile(resolved, updated, "utf-8");
           return { content: `Edited ${input.path}` };
         }
@@ -267,15 +270,29 @@ function makeEditTool(policy: FilePolicy): ToolDefinition<EditInput> {
   };
 }
 
+// 正则元字符：仅用于在无法命中时给出更有用的提示。
+const REGEX_META = /[$()*+.?[\\\]^{|}]/;
+
 function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
   return {
     name: "grep",
-    description: "在允许目录或允许单个文件下搜索文件内容中的文本模式。返回匹配的文件路径、行号和行文本。",
+    description:
+      "在允许目录或允许单个文件下搜索文件内容。返回匹配的文件路径、行号和行文本。pattern 默认按 JavaScript 正则表达式解析（不区分大小写）：'TODO|FIXME' 即多关键词，'.' '*' '^' '$' '(' ')' 等为元字符。要搜索含元字符的字面文本（如 'a.b'、'C++'、'3.5%'）请传 literal: true。结果最多 200 条，超出时末尾标记 results truncated。",
     inputSchema: {
       type: "object",
       properties: {
-        pattern: { type: "string", description: "要搜索的文本，不区分大小写" },
+        pattern: {
+          type: "string",
+          description:
+            "搜索模式，不区分大小写。默认按正则解析，如 'TODO|FIXME'、'^ERROR'、'版本\\d+'；literal 为 true 时按纯文本子串匹配",
+        },
         path: { type: "string", description: "可选的相对文件或目录路径，用于限制搜索范围" },
+        literal: {
+          type: "boolean",
+          description:
+            "可选，默认 false。为 true 时 pattern 按纯文本子串匹配，正则元字符不作特殊处理；适合搜索 'a.b'、'C++'、'3.5%' 这类字面文本",
+        },
+        regex: { type: "boolean", description: "兼容旧参数的别名：false 等价于 literal: true；true 或省略即正则模式" },
       },
       required: ["pattern"],
     },
@@ -293,8 +310,32 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
           assertPathAllowed(root, policy.allowedDirs, policy.allowedFiles);
         }
 
+        // 默认正则；literal: true（或旧参数 regex: false）强制字面量子串匹配。
+        const useLiteral = input.literal === true || input.regex === false;
+        const literalMatcher = (): ((line: string) => boolean) => {
+          const needle = input.pattern.toLowerCase();
+          return (line) => line.toLowerCase().includes(needle);
+        };
+
+        let matcher: (line: string) => boolean;
+        let note = "";
+        if (useLiteral) {
+          matcher = literalMatcher();
+        } else {
+          try {
+            const re = new RegExp(input.pattern, "i");
+            matcher = (line) => re.test(line);
+          } catch (err) {
+            // 显式 regex: true 时失败要报错，让调用方修正正则；
+            // 默认模式下则降级为字面量（多半是想搜字面文本却含未转义的元字符）。
+            if (input.regex === true) {
+              return { content: `Invalid regex pattern "${input.pattern}": ${(err as Error).message}`, isError: true };
+            }
+            matcher = literalMatcher();
+            note = `（pattern 无法作为正则解析（${(err as Error).message}），已按字面量搜索；如需固定按字面量，请传 literal: true）`;
+          }
+        }
         const matches: Array<{ file: string; line: number; text: string }> = [];
-        const needle = input.pattern.toLowerCase();
         let truncated = false;
 
         for (const root of roots) {
@@ -310,7 +351,7 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
               const content = await fs.readFile(file, "utf-8");
               const lines = content.split(/\r?\n/);
               for (let i = 0; i < lines.length; i++) {
-                if (!lines[i].toLowerCase().includes(needle)) continue;
+                if (!matcher(lines[i])) continue;
                 matches.push({
                   file: toRelativePath(file),
                   line: i + 1,
@@ -331,7 +372,12 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
         }
 
         if (matches.length === 0) {
-          return { content: `No matches found for "${input.pattern}"` };
+          // 正则模式下含元字符却完全没命中，提示模型改用 literal，避免它反复换关键词盲试
+          const hint =
+            !useLiteral && !note && REGEX_META.test(input.pattern)
+              ? "；本工具默认按正则解析，若本意是搜索含 . ( ) + * [ ] 等字符的字面文本，请传 literal: true"
+              : "";
+          return { content: `${note ? `${note}\n` : ""}No matches found for "${input.pattern}"${hint}` };
         }
 
         const grouped = new Map<string, Array<{ line: number; text: string }>>();
@@ -346,7 +392,7 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
           ...entries.map((entry) => `  ${entry.line}: ${entry.text}`),
         ].join("\n"));
 
-        return { content: blocks.join("\n") + (truncated ? "\n\nresults truncated" : "") };
+        return { content: (note ? `${note}\n` : "") + blocks.join("\n") + (truncated ? "\n\nresults truncated" : "") };
       } catch (err) {
         if (err instanceof ToolError) return { content: err.message, isError: true };
         return { content: `Failed to search: ${(err as Error).message}`, isError: true };

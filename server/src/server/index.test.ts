@@ -42,6 +42,11 @@ const mockConfig: Config = {
         { id: "deepseek-v4-flash", label: "v4-flash" },
       ],
     },
+    commandcode: {
+      apiKey: "",
+      baseUrl: "https://api.commandcode.ai/provider/v1",
+      models: [{ id: "z-ai/glm-5.3-flash", label: "glm-5.3-flash" }],
+    },
   },
   defaultProvider: "zai",
   defaultModel: "GLM-4.7",

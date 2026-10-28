@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Config, ProviderName } from "../config/index.js";
 import { chatStream } from "../chat/index.js";
+import type { TokenSpeedSnapshot } from "../chat/speed.js";
 import type { UsageRecord } from "../llm/types.js";
 import type { getLogger } from "../logger/index.js";
 import { loadSession } from "../session/index.js";
@@ -160,6 +161,7 @@ export async function processChatMessage(options: {
     let rawResponse = "";
     let usage: UsageRecord | undefined;
     let contextUsage: UsageRecord | undefined;
+    let tokenSpeed: TokenSpeedSnapshot | undefined;
 
     for await (const result of chatStream(sessionId, llmUserContent, config, {
       provider,
@@ -185,6 +187,7 @@ export async function processChatMessage(options: {
     })) {
       if (!result.done) {
         if (result.reasoning) sendChatEvent({ type: "chatReasoning", chunk: result.chunk });
+        else if (result.tokenSpeed) sendChatEvent({ type: "chatSpeed", ...result.tokenSpeed });
         else if (organizing) {
           rawResponse += result.chunk;
           const visible = visibleBeforeMarker(rawResponse);
@@ -204,6 +207,7 @@ export async function processChatMessage(options: {
         }
         usage = result.usage;
         contextUsage = result.contextUsage;
+        tokenSpeed = result.tokenSpeed;
       }
     }
 
@@ -241,7 +245,13 @@ export async function processChatMessage(options: {
       cachedWriteTokens: record.cachedWriteTokens,
       cost: record.cost,
     } : undefined;
-    sendChatEvent({ type: "chatEnd", fullResponse, usage: summarize(usage), contextUsage: summarize(contextUsage) });
+    sendChatEvent({
+      type: "chatEnd",
+      fullResponse,
+      usage: summarize(usage),
+      contextUsage: summarize(contextUsage),
+      tokenSpeed,
+    });
     logger.info(`Chat completed: ${(await loadSession(sessionId)).title}`);
   } catch (error) {
     logger.error(`Chat processing error: ${(error as Error).message}`);

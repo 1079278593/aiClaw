@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 
-export const SUPPORTED_PROVIDERS = ["zai", "dashscope", "deepseek"] as const;
+export const SUPPORTED_PROVIDERS = ["zai", "dashscope", "deepseek", "commandcode"] as const;
 export const THINKING_EFFORTS = ["off", "minimal", "low", "medium", "high"] as const;
 export const TAVILY_SEARCH_DEPTHS = ["basic", "advanced", "fast", "ultra-fast"] as const;
 export const TAVILY_FETCH_DEPTHS = ["basic", "advanced"] as const;
@@ -184,6 +184,13 @@ export const DEFAULT_CONFIG = {
       models: [
         { id: "deepseek-v4-flash", label: "v4-flash" },
         { id: "deepseek-v4-pro", label: "v4-pro" },
+      ],
+    },
+    commandcode: {
+      apiKey: "",
+      baseUrl: "https://api.commandcode.ai/provider/v1",
+      models: [
+        { id: "z-ai/glm-5.3-flash", label: "glm-5.3-flash" },
       ],
     },
   },

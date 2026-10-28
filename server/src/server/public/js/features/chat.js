@@ -14,14 +14,59 @@ export function createChatFeature({
   documents,
   actions,
 }) {
+  // 生成速度显示（composer 工具栏）：跟随当前会话；工具执行期间事件静默，超时淡化
+  let speedStaleTimer = null;
+  let speedHideTimer = null;
+
+  function formatSpeed(n) {
+    return n >= 100 ? `${Math.round(n)}` : n.toFixed(1);
+  }
+
+  function showSpeedDisplay(text, dim = false) {
+    if (!state.speedDisplayEl) return;
+    state.speedDisplayEl.textContent = text;
+    state.speedDisplayEl.classList.toggle("speed-stale", dim);
+  }
+
+  function hideSpeedDisplay() {
+    clearTimeout(speedStaleTimer);
+    clearTimeout(speedHideTimer);
+    speedStaleTimer = null;
+    speedHideTimer = null;
+    if (state.speedDisplayEl) {
+      state.speedDisplayEl.textContent = "";
+      state.speedDisplayEl.classList.remove("speed-stale");
+    }
+  }
+
+  function handleChatSpeed(message) {
+    if (typeof message.tokensPerSecond !== "number" || !Number.isFinite(message.tokensPerSecond)) return;
+    showSpeedDisplay(`${formatSpeed(message.tokensPerSecond)} tok/s`);
+    clearTimeout(speedStaleTimer);
+    speedStaleTimer = setTimeout(() => state.speedDisplayEl?.classList.add("speed-stale"), 2500);
+  }
+
   function sendMessage() {
     if (state.isStreaming) { cancelChat(); return; }
     if (!state.inputEl) return;
     const content = state.inputEl.value.trim();
     if ((!content && !state.pendingImages.length) || !state.currentSessionId) return;
     const images = state.pendingImages.map((image) => ({ url: image.url, path: image.path }));
+    const person = state.workspace === "people" ? state.personThread : null;
+    const captureJob = person?.captureJob;
+    if (person) person.captureJob = undefined;
+    // 乐观气泡与后端 payload 共用同一份引用上下文（人物工作区用人物预览，否则用文档预览）
+    const previewContext = person
+      ? {
+          ...(person.previewPath ? { previewPath: person.previewPath } : {}),
+          ...(person.selectedText ? { selectedPreviewText: person.selectedText } : {}),
+        }
+      : documents.getPreviewContextPayload();
     setSendDisabled(true);
-    state.pendingUserBubble = renderer.appendMessage("user", buildUserMessageContent(content, images), undefined, { scroll: false });
+    state.pendingUserBubble = renderer.appendMessage("user", buildUserMessageContent(content, images), undefined, {
+      scroll: false,
+      reference: previewContext,
+    });
     if (state.pendingUserBubble) {
       const msgEl = state.pendingUserBubble.closest(".message");
       if (msgEl) {
@@ -34,9 +79,6 @@ export function createChatFeature({
     scrollRoundAnchorToTop();
     state.currentSessionMessageCount++;
     state.pendingSubmission = { content, images };
-    const person = state.workspace === "people" ? state.personThread : null;
-    const captureJob = person?.captureJob;
-    if (person) person.captureJob = undefined;
     socket.send({
       type: "chatMessage",
       sessionId: state.currentSessionId,
@@ -49,10 +91,9 @@ export function createChatFeature({
         ? {
             threadPath: `inputs/people/${person.id}`,
             ...(captureJob ? { captureJob } : {}),
-            ...(person.previewPath ? { previewPath: person.previewPath } : {}),
-            ...(person.selectedText ? { selectedPreviewText: person.selectedText } : {}),
+            ...previewContext,
           }
-        : documents.getPreviewContextPayload()),
+        : previewContext),
     });
     documents.clearPreviewSelection();
     state.inputEl.value = "";
@@ -239,7 +280,7 @@ export function createChatFeature({
   }
 
   function handleServerMessage(message) {
-    const scopedTypes = ["chatStart", "chatChunk", "chatReasoning", "chatEnd", "chatCancelled", "toolCall", "toolResult", "toolPermissionRequest"];
+    const scopedTypes = ["chatStart", "chatChunk", "chatReasoning", "chatSpeed", "chatEnd", "chatCancelled", "toolCall", "toolResult", "toolPermissionRequest"];
     if (scopedTypes.includes(message.type) && message.sessionId && message.sessionId !== state.currentSessionId) {
       updateBackgroundSession(message);
       return;
@@ -276,6 +317,9 @@ export function createChatFeature({
         break;
       case "chatChunk":
         if (state.streamingBubble) streaming.appendChunk(state.streamingBubble, message.chunk);
+        break;
+      case "chatSpeed":
+        handleChatSpeed(message);
         break;
       case "chatEnd":
         handleChatEnd(message);
@@ -323,6 +367,7 @@ export function createChatFeature({
     state.isStreaming = true;
     setSendDisabled(true);
     syncCompactButton();
+    hideSpeedDisplay();
     state.pendingToolBlocks = {};
     state.streamingReasoningBlock = null;
     state.currentTextSegment = null;
@@ -380,6 +425,7 @@ export function createChatFeature({
 
   function handleChatCancelled(message) {
     state.isStreaming = false;
+    hideSpeedDisplay();
     setSendDisabled(false);
     state.inputEl?.focus();
     streaming.removeTypingDots();
@@ -432,6 +478,16 @@ export function createChatFeature({
     permissions.clearForSession(message.sessionId);
     if (message.contextUsage || message.usage) state.latestUsage = message.contextUsage || message.usage;
     updateTokenDisplay(state.latestUsage);
+    // 用真实 outputTokens 显示精确平均速率，停留几秒后隐藏
+    const speedFinal = message.tokenSpeed;
+    if (speedFinal?.outputTokens > 0 && speedFinal.elapsedMs > 0) {
+      const avg = speedFinal.outputTokens / (speedFinal.elapsedMs / 1000);
+      showSpeedDisplay(`${formatSpeed(avg)} tok/s`);
+      clearTimeout(speedHideTimer);
+      speedHideTimer = setTimeout(hideSpeedDisplay, 4000);
+    } else {
+      hideSpeedDisplay();
+    }
     void actions.refreshSessionSummary(message.sessionId);
     void actions.refreshRecentModels();
     updateCurrentCache();
@@ -536,5 +592,6 @@ export function createChatFeature({
     syncCompactButton,
     updateSendAvailability,
     updateTokenDisplay,
+    hideSpeedDisplay,
   };
 }

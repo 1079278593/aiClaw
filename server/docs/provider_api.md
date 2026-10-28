@@ -31,12 +31,14 @@
 - `zai`
 - `dashscope`
 - `deepseek`
+- `commandcode`
 
 相关实现文件：
 
 - `src/llm/providers/zai.ts`
 - `src/llm/providers/dashscope.ts`
 - `src/llm/providers/deepseek.ts`
+- `src/llm/providers/commandcode.ts`
 - 公共类型：`src/llm/types.ts`
 
 ---
@@ -500,7 +502,21 @@ DeepSeek 为 OpenAI-compatible 风格接口，工具调用阶段可按非流式 
 
 ---
 
-## 6. 三家 provider 的关键差异
+## 6. Command Code
+
+实现文件：`src/llm/providers/commandcode.ts`  
+文档：https://commandcode.ai/docs/provider  
+默认 endpoint：`https://api.commandcode.ai/provider/v1`
+
+- OpenAI Chat Completions 兼容：`POST {baseUrl}/chat/completions`
+- 使用 `max_completion_tokens`（不是 `max_tokens`）
+- Thinking 通过 `reasoning_effort`（`off | low | medium | high | max` 等）；部分模型不支持 `off`
+- 流式/非流式思考字段兼容：`reasoning_content` / `reasoning` / `reasoning_text`
+- 模板默认模型示例：`z-ai/glm-5.3-flash`、`deepseek/deepseek-v4.1-flash`（需在账户设置填 API Key 后才会出现在可用列表）
+
+---
+
+## 7. 各 provider 的关键差异
 
 ### 6.1 Thinking 写法不同
 

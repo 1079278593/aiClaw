@@ -160,6 +160,33 @@
           "thinkingOff": { "thinking": { "type": "disabled" } }
         }
       ]
+    },
+    "commandcode": {
+      "apiKey": "",
+      "baseUrl": "https://api.commandcode.ai/provider/v1",
+      "models": [
+        {
+          "id": "z-ai/glm-5.3-flash",
+          "label": "glm-5.3-flash",
+          "cost": { "input": 0.8, "output": 2.8, "cachedRead": 0.23 },
+          "thinking": [
+            { "id": "low", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "low" } },
+            { "id": "high", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } },
+            { "id": "max", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "max" } }
+          ]
+        },
+        {
+          "id": "deepseek/deepseek-v4.1-flash",
+          "label": "ds-v4.1-flash",
+          "cost": { "input": 1.0, "output": 4.0, "cachedRead": 0.2 },
+          "thinking": [
+            { "id": "low", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "low" } },
+            { "id": "high", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } },
+            { "id": "max", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "max" } }
+          ],
+          "thinkingOff": { "reasoning_effort": "off" }
+        }
+      ]
     }
   },
   "defaultProvider": "deepseek",

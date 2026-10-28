@@ -533,3 +533,74 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
       transition: transform 0.2s;
     }
+
+    /* ---- 用户消息图片缩略图 & 全屏预览 ---- */
+
+    .user-message-text {
+      white-space: pre-wrap;
+    }
+
+    /* 连续图片横向排列，超出换行 */
+    .message-image-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .message-image-row + .user-message-text { margin-top: 6px; }
+
+    .message-content > .message-image-row:first-child { margin-top: 0; }
+
+    .message-image-thumb {
+      display: block;
+      flex-shrink: 0;
+      width: 54px;
+      height: 54px;
+      object-fit: cover;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 6px;
+      cursor: zoom-in;
+    }
+
+    .image-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 32px;
+      background: rgba(10, 14, 22, 0.78);
+      backdrop-filter: blur(4px);
+      cursor: zoom-out;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.15s ease, visibility 0s 0.15s;
+    }
+
+    .image-lightbox.open {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition-delay: 0s;
+    }
+
+    .image-lightbox-img {
+      max-width: calc(100vw - 64px);
+      max-height: calc(100vh - 96px);
+      border-radius: 8px;
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+    }
+
+    .image-lightbox-caption {
+      max-width: calc(100vw - 64px);
+      overflow: hidden;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }

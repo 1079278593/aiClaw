@@ -101,6 +101,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
                     <i data-lucide="${documents.getAttachDocContext() ? "file" : "eye-off"}"></i>
                   </button>
                   <span id="token-display" title="当前上下文长度"></span>
+                  <span id="speed-display" title="生成速度（估算）"></span>
                 </div>
                 <div class="composer-right">
                   <div class="toolbar-menu-control"><select id="model-select" hidden></select><button id="model-select-trigger" class="toolbar-select" type="button" title="Model" aria-label="Model" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-select-menu"><span class="toolbar-select-value"></span><i data-lucide="chevron-down"></i></button><div id="model-select-menu" class="toolbar-select-menu" role="listbox" aria-label="Model"></div></div>
@@ -149,6 +150,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
     state.inputEl = document.getElementById("message-input");
     state.sendBtn = document.getElementById("send-btn");
     state.tokenDisplayEl = document.getElementById("token-display");
+    state.speedDisplayEl = document.getElementById("speed-display");
     state.compactBtnEl = document.getElementById("compact-btn");
     state.modelSelectEl = document.getElementById("model-select");
     state.thinkingEffortSelectEl = document.getElementById("thinking-effort-select");
@@ -414,7 +416,9 @@ export function createChatView({ state, documents, pickers, permissions, actions
       fragments.push(row);
     }
 
+    // 最近列表可能残留已从 config 中删除的模型，渲染前先过滤（需在 slice 之前，避免陈旧条目占用展示位）
     const recent = (state.recentModels || [])
+      .filter((entry) => getModelsForProvider(entry.provider).some((model) => model.id === entry.model))
       .filter((entry) => !(entry.provider === state.currentProvider && entry.model === state.currentModel))
       .slice(0, 2)
       .reverse();

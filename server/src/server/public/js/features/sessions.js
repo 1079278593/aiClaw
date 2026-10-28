@@ -102,9 +102,24 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     }
   }
 
+  // 会话记录的 provider/model 可能已从 config 中删除（如模型下线），校验后回退：
+  // provider 无效 → defaultProvider；model 无效 → 该 provider 的首个模型，再退 defaultModel
+  function resolveSessionRuntime(session) {
+    const provider = state.availableProviders.includes(session?.lastProvider)
+      && Array.isArray(state.providerConfigs?.[session.lastProvider]?.models)
+      ? session.lastProvider
+      : state.defaultProvider;
+    const models = state.providerConfigs?.[provider]?.models;
+    const model = Array.isArray(models) && models.some((item) => item.id === session?.lastModel)
+      ? session.lastModel
+      : (Array.isArray(models) && models[0]?.id) || state.defaultModel;
+    return { provider, model };
+  }
+
   function applySessionRuntimeState(session) {
-    state.currentProvider = session?.lastProvider || state.defaultProvider;
-    state.currentModel = session?.lastModel || state.defaultModel;
+    const runtime = resolveSessionRuntime(session);
+    state.currentProvider = runtime.provider;
+    state.currentModel = runtime.model;
     state.currentThinkingEffort = session?.lastThinkingEffort || state.defaultThinkingEffort;
     actions.syncModelControls();
   }
@@ -208,6 +223,8 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     permissions.hideActive();
     saveSessionState(state.currentSessionId);
     state.currentSessionId = id;
+    // 速度显示跟随会话：先清掉上个会话的速率，若目标会话在生成中，事件重放会恢复
+    actions.hideSpeedDisplay?.();
     // 若会话列表面板正打开着（show-home），切换到新会话后自动收起
     actions.setChatHomeVisible?.(false);
     const inputSnapshot = state.inputEl?.value ?? "";
@@ -257,8 +274,9 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     state.pendingToolBlocks = {};
     state.typingPlaceholder = null;
     state.compactingBubble = null;
-    state.currentProvider = session?.lastProvider || state.defaultProvider;
-    state.currentModel = session?.lastModel || state.defaultModel;
+    const runtime = resolveSessionRuntime(session);
+    state.currentProvider = runtime.provider;
+    state.currentModel = runtime.model;
     state.currentThinkingEffort = session?.lastThinkingEffort || state.defaultThinkingEffort;
     state.latestUsage = null;
     state.currentSessionMessageCount = 0;

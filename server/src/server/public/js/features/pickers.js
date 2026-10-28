@@ -1,5 +1,6 @@
 import { requestJson } from "../api.js";
 import { escHtml } from "../format.js";
+import { openImagePreview } from "../render/image-preview.js";
 import { getOpenTabPaths, getRecentOpenedPaths } from "./documents.js";
 
 export function createPickerFeature({ state, autoResizeInput, updateSendAvailability }) {
@@ -33,15 +34,23 @@ export function createPickerFeature({ state, autoResizeInput, updateSendAvailabi
       updateSendAvailability?.();
       return;
     }
+    const imageLabel = (image) => image.path || "clipboard:image.png";
     state.pendingImagesEl.style.display = "flex";
     state.pendingImagesEl.innerHTML = state.pendingImages.map((image, index) => `
-      <div class="pending-image-item">
-        <div class="pending-image-path">${escHtml(image.path || "clipboard:image.png")}</div>
-        <button class="pending-image-remove" type="button" data-index="${index}" title="删除">×</button>
+      <div class="pending-image-item" title="${escHtml(imageLabel(image))}">
+        <img class="pending-image-thumb" src="${image.url}" alt="${escHtml(imageLabel(image))}" data-index="${index}">
+        <button class="pending-image-remove" type="button" data-index="${index}" title="删除" aria-label="删除图片">×</button>
       </div>
     `).join("");
+    state.pendingImagesEl.querySelectorAll(".pending-image-thumb").forEach((thumb) => {
+      thumb.addEventListener("click", () => {
+        const image = state.pendingImages[Number(thumb.dataset.index)];
+        if (image) openImagePreview(image.url, image.path);
+      });
+    });
     state.pendingImagesEl.querySelectorAll(".pending-image-remove").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
         state.pendingImages.splice(Number(button.dataset.index), 1);
         renderPendingImages();
       });

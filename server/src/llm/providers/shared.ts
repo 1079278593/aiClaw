@@ -52,15 +52,14 @@ export function mapMessage(m: Message): {
   reasoning_content?: string;
 } {
   const content = stripImagePath(m.content);
-  if (m.role === "tool") return { role: "tool", content, tool_call_id: m.tool_call_id };
-  if (m.tool_calls)
-    return {
-      role: m.role,
-      content,
-      tool_calls: m.tool_calls,
-      ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
-    };
-  return { role: m.role, content };
+  // reasoning_content 无条件随消息回传（所有 provider 均支持）
+  return {
+    role: m.role,
+    content,
+    ...(m.role === "tool" ? { tool_call_id: m.tool_call_id } : {}),
+    ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+    ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
+  };
 }
 
 export async function fetchWithRetry(
