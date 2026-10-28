@@ -18,6 +18,7 @@ vitest-debug.log*
 .env
 .env.local
 .env.*.local
+deploy/nas.env
 
 # IDE
 .vscode/
@@ -38,3 +39,6 @@ coverage/
 *.tmp
 .tmp/
 .test-data/
+
+# NAS 镜像包，不进 git
+deploy/*.tar

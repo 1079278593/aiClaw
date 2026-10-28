@@ -1,4 +1,4 @@
-# hyxClaw
+# aiClaw
 
 介绍视频：https://www.bilibili.com/video/BV1CeKY6SEbw/
 
@@ -11,13 +11,16 @@
 
 ## 快速开始
 
+以下命令都在 `server/` 目录执行。
+
 ```powershell
+cd server
 pnpm install
 ```
 
-在项目根目录创建 .env，并指定用户数据目录
+在 `server/` 创建 .env，并指定用户数据目录
 ```
-HYXCLAW_DATA_DIR=D:\MyData
+AICLAW_DATA_DIR=D:\MyData
 ```
 
 复制模板、创建所需目录，并生成配置文件
@@ -25,7 +28,7 @@ HYXCLAW_DATA_DIR=D:\MyData
 pnpm dev init
 ```
 
-编辑 ${HYXCLAW_DATA_DIR}\config.json，填入模型提供商和搜索提供商的 API Key；默认模型提供商API Key必填，否则无法启动，其他API Key不填则相应功能禁用。
+编辑 ${AICLAW_DATA_DIR}\config.json，填入模型提供商和搜索提供商的 API Key；默认模型提供商API Key必填，否则无法启动，其他API Key不填则相应功能禁用。
 
 ```
 pnpm build
@@ -34,13 +37,13 @@ pnpm start
 
 浏览器打开 `http://127.0.0.1:3000`。启动时也可使用 `pnpm start -- -p 8080` 或 `pnpm start -- --host 0.0.0.0` 覆盖端口和地址。
 
-完成首次配置后，也可双击项目根目录的 `start.bat`（Windows）或 `start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
+完成首次配置后，也可双击 `server/start.bat`（Windows）或 `server/start.command`（macOS）启动服务，脚本会自动打开浏览器。macOS 的 `start.command` 会先检查 Node.js，缺少 pnpm / 依赖 / 编译产物时会自动安装或构建；若还没有 `.env`，会提示输入数据目录并在需要时执行 `init`。若改过 `config.json` 中的端口，请同步修改脚本里的 `OPEN_URL`。
 
-`HYXCLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
+`AICLAW_DATA_DIR` 必须设置；程序不会为它选择默认目录。初始化不会覆盖数据目录中已有的文件。
 
 ## 配置
 
-首次执行 `init` 后，模板配置写入 `{HYXCLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](templates/config.json) 为准；以下示例展示配置结构：
+首次执行 `init` 后，模板配置写入 `{AICLAW_DATA_DIR}/config.json`。当前可用字段以 [templates/config.json](server/templates/config.json) 为准；以下示例展示配置结构：
 
 ```jsonc
 {
@@ -129,6 +132,13 @@ pnpm start
       "fetchDepth": "basic",
       "fetchFormat": "markdown",
       "maxFetchedChars": 50000
+    },
+    "trilium": {
+      "enabled": false,
+      "baseUrl": "http://127.0.0.1:8080",
+      "token": "",
+      "ancestorNoteId": "",
+      "timeoutMs": 15000
     }
   },
   "compaction": {
@@ -145,7 +155,8 @@ pnpm start
 - `thinking` 是模型支持的思考选项。每个选项通过 `params` 原样传给该提供商；`thinkingOff` 定义关闭思考时的参数。
 - `modal: "vl"` 可标记支持视觉输入的模型。
 - 文件工具只能访问 `fs.allowedDirs` 与 `fs.allowedFiles`。路径均相对于数据目录。
-- Tavily 配置完整字段和默认值见 [schema.ts](src/config/schema.ts)。
+- Tavily 配置完整字段和默认值见 [schema.ts](server/src/config/schema.ts)。
+- `tools.trilium`：可选只读接入 Trilium / TriliumNext。`enabled` 且填写 ETAPI `token` 后，右侧栏出现 `trilium` 根目录，AI 可搜索和阅读笔记，不能写入。建议设置 `ancestorNoteId` 限制可读子树。已有数据目录的系统提示词不会自动更新，需在 `files/prompts/agent_system_prompt.txt` 中自行补上 Trilium 说明。
 
 ## 功能
 
@@ -154,7 +165,7 @@ pnpm start
 - 多模型配置：目前支持智谱、阿里百炼和 DeepSeek；模型可分别声明视觉能力及原生思考参数
 - 文件与图片：在允许的数据目录中读取、写入、编辑、搜索、移动和删除文件；`read` 工具同时支持文本与图片（视觉模型可读取允许目录中的图片），对话框支持粘贴图片附件
 - Web 搜索：可选启用 Tavily 搜索和网页抓取
-- 知识库与文档：浏览、编辑 Markdown 文档，维护知识库索引
+- 知识库与文档：浏览、编辑 Markdown 文档，维护知识库索引；可选只读接入 Trilium
 - 用量统计：按提供商、模型和日期记录 Token 使用量和费用，以及总量
 - 本地存储：会话、配置、提示词和统计数据均保存在本地数据目录
 
@@ -165,7 +176,7 @@ pnpm start
 
 - **左侧栏**：管理会话，可新建、切换、重命名和删除会话。
 - **中间信息流**：显示当前会话的对话、思考过程和工具调用状态；底部可选择模型与思考强度、设置写入权限并发送消息。
-- **右侧栏**：在 `knowledge_base/` 与 `inputs/` 两个根目录间浏览文档，可预览和编辑文本；打开的文件以标签页形式保留，可将当前标签的文件或选中文字作为下一条消息的上下文。
+- **右侧栏**：在 `knowledge_base/`、`inputs/` 与（若已启用）`trilium` 之间浏览文档。本地文本可预览和编辑；Trilium 笔记只读。打开的文件以标签页形式保留，可将当前标签的文件或选中文字作为下一条消息的上下文。
 
 ### 聊天/阅读模式
 
@@ -176,9 +187,9 @@ pnpm start
 
 ### 一般流程
 
-1. 外部文件或图片放入${HYXCLAW_DATA_DIR}/inputs/中，或提供网址供AI读取
+1. 外部文件或图片放入${AICLAW_DATA_DIR}/inputs/中，或提供网址供AI读取；日常已记在 Trilium 里的内容可让 AI 搜索阅读（需启用 `tools.trilium`，只读）
 2. 与AI聊天总结该文档主要内容
-3. 要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件。
+3. 要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件（写入本地 `knowledge_base/`，不会改 Trilium）。
 
 ### 系统 Prompt
 
@@ -213,7 +224,7 @@ pnpm start
 
 #### 引用文件 @
 
-在输入框中输入 `@` 会弹出文件搜索面板，实时搜索 `allowedDirs` 中的文件。输入 `@` 时，当前打开的标签页文件默认显示在列表前方；继续输入关键词后，匹配的已打开标签文件仍优先于其他搜索结果。用 ↑↓ 键或鼠标选择文件，回车或点击确认后插入 `[路径]` 格式的引用。
+在输入框中输入 `@` 会弹出文件搜索面板，同时搜索本地 `allowedDirs` 中的文件，以及（若已启用）Trilium 笔记。Trilium 结果带 `[trilium]` 标记，插入的引用为 `trilium:{noteId}`。输入 `@` 时，当前打开的标签页默认显示在列表前方；继续输入关键词后，匹配的已打开标签仍优先于其他搜索结果。用 ↑↓ 键或鼠标选择，回车或点击确认后插入 `[路径]` 格式的引用。
 
 #### 常用命令 /
 
@@ -294,16 +305,16 @@ pnpm start
 
 ### 异地使用
 
-所有的本地数据就放置在${HYXCLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。
+所有的本地数据就放置在${AICLAW_DATA_DIR}这个数据文件夹中，整个数据文件夹可以在github备份，在不同的电脑上同步该文件夹即可使用。同时Markdown知识库可以同步至手机端随时查看，iphone推荐应用Mdown。
 
 ## CLI
 
 ```bash
-hyxclaw init                    # 初始化数据目录和模板配置
-hyxclaw start                   # 启动 Web 服务
-hyxclaw start -p 8080           # 指定端口
-hyxclaw start --host 0.0.0.0    # 指定监听地址
-hyxclaw status                  # 检查配置、数据目录与启动条件
+aiclaw init                    # 初始化数据目录和模板配置
+aiclaw start                   # 启动 Web 服务
+aiclaw start -p 8080           # 指定端口
+aiclaw start --host 0.0.0.0    # 指定监听地址
+aiclaw status                  # 检查配置、数据目录与启动条件
 ```
 
 ## HTTP API
@@ -331,6 +342,8 @@ WebSocket 地址为 `ws://127.0.0.1:3000/ws`，用于会话切换、聊天流、
 
 ## 开发
 
+在 `server/` 目录执行：
+
 ```bash
 pnpm dev              # 以 tsx 运行 CLI
 pnpm build            # TypeScript 编译到 dist/
@@ -345,7 +358,7 @@ pnpm type-check       # 仅进行类型检查
 ## 数据目录
 
 ```text
-{HYXCLAW_DATA_DIR}/
+{AICLAW_DATA_DIR}/
 ├── .gitignore                         # 数据目录自身的 Git 忽略规则：排除日志、会话压缩归档和高频变化的界面状态
 ├── .installed_templates.json           # 已安装的示例模板记录；删除过的示例不会在下次 init 时重新创建
 ├── config.json                         # 应用配置：模型提供商、API Key、默认模型、文件访问范围及服务设置

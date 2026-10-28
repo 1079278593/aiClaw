@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="aiClaw Inbox">
+  <title>aiClaw Inbox</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <h1>aiClaw Inbox</h1>
+      <p class="hint">录入到 <code>inputs/chats</code>。语音请用键盘麦克风听写后提交。</p>
+    </header>
+
+    <section class="card" id="auth-card">
+      <label>访问 Token</label>
+      <input id="token-input" type="password" autocomplete="current-password" placeholder="INBOX_TOKEN">
+      <button type="button" id="save-token-btn" class="primary">保存并连接</button>
+      <p class="status" id="auth-status"></p>
+    </section>
+
+    <section class="card hidden" id="main-card">
+      <label>会话</label>
+      <div class="row">
+        <select id="thread-select"></select>
+        <button type="button" id="refresh-btn" class="ghost">刷新</button>
+      </div>
+
+      <details class="create-box">
+        <summary>新建会话</summary>
+        <label>名称（私聊可用对方名字；群聊用群名）</label>
+        <input id="new-title" type="text" placeholder="例如：张三 或 周末聚餐">
+        <label>类型</label>
+        <select id="new-kind">
+          <option value="dm">私聊</option>
+          <option value="group">群聊</option>
+        </select>
+        <label>成员（逗号分隔，自动包含「我」）</label>
+        <input id="new-members" type="text" placeholder="张三,李四">
+        <button type="button" id="create-thread-btn" class="primary">创建</button>
+      </details>
+
+      <label>本句说话人</label>
+      <select id="speaker-select"></select>
+
+      <label>文字（可用系统键盘听写）</label>
+      <textarea id="text-input" rows="5" placeholder="点这里，用键盘麦克风听写或直接输入…"></textarea>
+      <button type="button" id="send-text-btn" class="primary">提交文字</button>
+
+      <label>图片</label>
+      <input id="image-input" type="file" accept="image/*" capture="environment">
+      <button type="button" id="send-image-btn" class="primary">上传图片</button>
+
+      <p class="status" id="main-status"></p>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

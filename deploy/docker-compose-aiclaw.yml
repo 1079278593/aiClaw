@@ -1,0 +1,17 @@
+# NAS 部署用 Compose（绿联 Docker → 项目 → 创建）。
+# 无 build。先在「镜像」里导入 aiclaw:local。
+# 与 aiclaw.env、data/ 放在同一目录。
+
+services:
+  aiclaw:
+    image: aiclaw:local
+    pull_policy: never
+    env_file: ["aiclaw.env"]
+    ports:
+      # 左边是 NAS 端口，右边是容器内端口。3000 在 NAS 上常被占用，所以对外用 3010。
+      # 不写 127.0.0.1，局域网可以用 http://guobao.local:3010 打开。
+      # frp 在同一台 NAS 上时，仍可转发到 127.0.0.1:3010。
+      - "3010:3000"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
