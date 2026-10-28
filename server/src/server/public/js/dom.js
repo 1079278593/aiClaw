@@ -5,7 +5,7 @@ import { openKnowledgeModal } from "./features/knowledge.js";
 import { openUsageModal, switchUsageTab, setUsageDays, toggleUsageMetric } from "./features/usage.js";
 import { requestJson } from "./api.js";
 
-export function createChatView({ state, documents, pickers, permissions, actions, people }) {
+export function createChatView({ state, documents, pickers, permissions, actions, people, reflections }) {
   let toolbarMenuOutsideClickBound = false;
   let staticModalBindingsBound = false;
 
@@ -139,6 +139,7 @@ export function createChatView({ state, documents, pickers, permissions, actions
     actions.syncCompactButton();
     actions.updateTokenDisplay(state.latestUsage);
     people?.remount();
+    reflections?.remount();
 
     // Trigger lucide icon rendering for dynamically added elements
     window.lucide?.createIcons();

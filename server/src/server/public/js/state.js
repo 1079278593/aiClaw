@@ -36,6 +36,7 @@ export function createAppState() {
     disconnectNotified: false,
     workspace: "docs",
     personThread: null,
+    reflectionPreview: null,
     afterChat: null,
     userScrolledUp: false,
     sessionLoadRequestId: null,

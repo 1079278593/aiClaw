@@ -199,3 +199,22 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 正在看原文或历史简报时，`previewPath` 分别为 `inputs/people/<id>/entries.jsonl`、`inputs/people/<id>/digest.md`。选中文字时再带 `selectedPreviewText`。没打开这两份、只是选中了人，不设置 `previewPath`。
 
+## 8. 心得 reflections
+
+根目录：`inputs/reflections/`（默认快记 `inbox/`）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/reflections?q=` | 扫树扁平列表，按 `occurredAt` 降序。`view=tree` 时返回目录树 |
+| `POST /api/reflections` | `{ title, body?, occurredAt?, context?, folder? }`，默认 `folder=inbox` |
+| `GET /api/reflections/content?path=` | 单篇 |
+| `PUT /api/reflections/content` | 按 path 更新；`.txt` 首次保存转为 `.md` |
+| `DELETE /api/reflections?path=` | 删除 |
+| `POST /api/reflections/parse` | 只解析记事本粘贴，不写盘 |
+| `POST /api/reflections/import` | `{ text?\|sourcePath?, folder?, dryRun?, deleteSource? }` 拆篇写入 |
+| `POST /api/reflections/mkdir` | `{ folder }` |
+| `POST /api/reflections/move` | `{ from, toFolder?\|toPath? }` |
+| `POST /api/reflections/organize-by-date` | `{ path }` → 移到 `YYYY/MM/` |
+
+拿去问：打开该篇后发 `chatMessage` 带 `previewPath`（路径如 `inputs/reflections/inbox/xxx.md`），不设 `threadPath`。
+

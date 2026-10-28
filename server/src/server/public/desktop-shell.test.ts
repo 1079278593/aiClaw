@@ -22,8 +22,11 @@ describe("desktop document homepage", () => {
     expect(html).toContain('id="file-root-tabs"');
     expect(html).toContain('id="file-tree" role="tree"');
     expect(html).toContain('id="people-browser" hidden');
+    expect(html).toContain('id="workspace-reflections"');
+    expect(html).toContain('id="reflections-browser" hidden');
     expect(html).not.toMatch(/<body[^>]*people-workspace/);
     expect(css).toContain("body.people-workspace #file-tree");
+    expect(css).toContain("body.reflections-workspace #file-tree");
     expect(css).toContain("#sidebar.collapsed #workspace-switch");
   });
 

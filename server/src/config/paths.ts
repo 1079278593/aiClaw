@@ -74,6 +74,7 @@ export async function ensureDirectories(paths: ReturnType<typeof getPaths>): Pro
     paths.conversations,
     paths.conversationArchive,
     paths.inputs,
+    path.join(paths.inputs, "reflections", "inbox"),
     paths.knowledgeBase,
     paths.files,
   ];

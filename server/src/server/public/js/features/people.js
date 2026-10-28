@@ -275,14 +275,31 @@ export function createPeopleFeature({ state, actions }) {
   }
 
   function setWorkspace(next) {
+    if (state.workspace === "reflections" && next !== "reflections" && actions.canLeaveReflections && !actions.canLeaveReflections()) {
+      return;
+    }
     state.workspace = next;
     document.body.classList.toggle("people-workspace", next === "people");
+    document.body.classList.toggle("reflections-workspace", next === "reflections");
     document.getElementById("workspace-docs")?.classList.toggle("active", next === "docs");
     document.getElementById("workspace-people")?.classList.toggle("active", next === "people");
-    document.getElementById("people-browser").hidden = next !== "people";
-    if (next === "people") void loadPeople();
-    else document.getElementById("people-stage")?.remove();
+    document.getElementById("workspace-reflections")?.classList.toggle("active", next === "reflections");
+    const peopleBrowser = document.getElementById("people-browser");
+    if (peopleBrowser) peopleBrowser.hidden = next !== "people";
+    const reflectionsBrowser = document.getElementById("reflections-browser");
+    if (reflectionsBrowser) reflectionsBrowser.hidden = next !== "reflections";
+    if (next === "people") {
+      state.reflectionPreview = null;
+      void loadPeople();
+    } else {
+      document.getElementById("people-stage")?.remove();
+    }
+    if (next !== "reflections") {
+      document.getElementById("reflections-stage")?.remove();
+      state.reflectionPreview = null;
+    }
     remount();
+    actions.reflectionsRemount?.();
   }
 
   function remount() {

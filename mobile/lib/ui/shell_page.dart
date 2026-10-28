@@ -10,6 +10,7 @@ import 'document_reader.dart';
 import 'more_page.dart';
 import 'people_list_page.dart';
 import 'person_page.dart';
+import 'reflections_list_page.dart';
 import 'session_list_page.dart';
 
 const _handleWidth = 16.0;
@@ -76,7 +77,8 @@ class ShellPage extends StatefulWidget {
 class _ShellPageState extends State<ShellPage> {
   var _tab = 0;
   var _sidebar = 0;
-  var _peopleWorkspace = false;
+  /// docs | people | reflections
+  var _workspace = 'docs';
   String? _personId;
   var _personName = '';
   PersonConsult? _consult;
@@ -138,6 +140,7 @@ class _ShellPageState extends State<ShellPage> {
         children: [
           SessionListPage(controller: widget.controller),
           PeopleListPage(controller: widget.controller),
+          ReflectionsListPage(controller: widget.controller),
           DocumentsPage(controller: widget.controller),
           MorePage(controller: widget.controller),
         ],
@@ -148,6 +151,7 @@ class _ShellPageState extends State<ShellPage> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: '聊天'),
           NavigationDestination(icon: Icon(Icons.contacts_outlined), label: '人物'),
+          NavigationDestination(icon: Icon(Icons.menu_book_outlined), label: '心得'),
           NavigationDestination(icon: Icon(Icons.folder_outlined), label: '文档'),
           NavigationDestination(icon: Icon(Icons.more_horiz), label: '更多'),
         ],
@@ -165,7 +169,7 @@ class _ShellPageState extends State<ShellPage> {
               children: [
                 _workspaceSwitch(),
                 Expanded(
-                  child: _peopleWorkspace
+                  child: _workspace == 'people'
                       ? Row(
                           children: [
                             SizedBox(width: side, child: _peopleList(embedded: true)),
@@ -173,17 +177,19 @@ class _ShellPageState extends State<ShellPage> {
                             Expanded(child: _personOrPrompt()),
                           ],
                         )
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(width: side, child: _portraitSidebar()),
-                            _ColumnHandle(
-                              onDrag: (dx) => setState(() => _sideWidth = side + dx),
-                              onDragEnd: _saveWidths,
+                      : _workspace == 'reflections'
+                          ? ReflectionsListPage(controller: widget.controller)
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(width: side, child: _portraitSidebar()),
+                                _ColumnHandle(
+                                  onDrag: (dx) => setState(() => _sideWidth = side + dx),
+                                  onDragEnd: _saveWidths,
+                                ),
+                                Expanded(child: _sidebar == 0 ? _chatOrEmpty() : DocumentReaderPage(controller: widget.controller, embedded: true)),
+                              ],
                             ),
-                            Expanded(child: _sidebar == 0 ? _chatOrEmpty() : DocumentReaderPage(controller: widget.controller, embedded: true)),
-                          ],
-                        ),
                 ),
               ],
             );
@@ -235,24 +241,26 @@ class _ShellPageState extends State<ShellPage> {
               children: [
                 _workspaceSwitch(),
                 Expanded(
-                  child: _peopleWorkspace
+                  child: _workspace == 'people'
                       ? _peopleWide(total)
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(width: doc, child: _docSidebar(footer: true)),
-                            _ColumnHandle(
-                              onDrag: (dx) => setState(() => _docWidth = doc + dx),
-                              onDragEnd: _saveWidths,
+                      : _workspace == 'reflections'
+                          ? ReflectionsListPage(controller: widget.controller)
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(width: doc, child: _docSidebar(footer: true)),
+                                _ColumnHandle(
+                                  onDrag: (dx) => setState(() => _docWidth = doc + dx),
+                                  onDragEnd: _saveWidths,
+                                ),
+                                Expanded(child: DocumentReaderPage(controller: widget.controller, embedded: true)),
+                                _ColumnHandle(
+                                  onDrag: (dx) => setState(() => _chatWidth = chat - dx),
+                                  onDragEnd: _saveWidths,
+                                ),
+                                SizedBox(width: chat, child: _chatOrEmpty(showHistory: true)),
+                              ],
                             ),
-                            Expanded(child: DocumentReaderPage(controller: widget.controller, embedded: true)),
-                            _ColumnHandle(
-                              onDrag: (dx) => setState(() => _chatWidth = chat - dx),
-                              onDragEnd: _saveWidths,
-                            ),
-                            SizedBox(width: chat, child: _chatOrEmpty(showHistory: true)),
-                          ],
-                        ),
                 ),
               ],
             );
@@ -265,13 +273,14 @@ class _ShellPageState extends State<ShellPage> {
   Widget _workspaceSwitch() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: SegmentedButton<bool>(
+      child: SegmentedButton<String>(
         segments: const [
-          ButtonSegment(value: false, label: Text('文档')),
-          ButtonSegment(value: true, label: Text('人物')),
+          ButtonSegment(value: 'docs', label: Text('文档')),
+          ButtonSegment(value: 'people', label: Text('人物')),
+          ButtonSegment(value: 'reflections', label: Text('心得')),
         ],
-        selected: {_peopleWorkspace},
-        onSelectionChanged: (value) => setState(() => _peopleWorkspace = value.first),
+        selected: {_workspace},
+        onSelectionChanged: (value) => setState(() => _workspace = value.first),
       ),
     );
   }

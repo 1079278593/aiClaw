@@ -707,6 +707,7 @@ body {
 
 #workspace-switch button,
 #people-toolbar button,
+#reflections-toolbar button,
 .people-panes button {
   border: 1px solid var(--line, #ddd);
   background: transparent;
@@ -716,8 +717,10 @@ body {
 
 #workspace-switch button.active,
 #people-toolbar button.active,
+#reflections-toolbar button.active,
 .people-panes button.active,
-.people-row.active {
+.people-row.active,
+.reflections-row.active {
   background: var(--surface-2, #f3f0e8);
 }
 
@@ -725,7 +728,12 @@ body.people-workspace #file-root-tabs,
 body.people-workspace #file-tree,
 body.people-workspace #doc-view-tabs,
 body.people-workspace #doc-preview-toolbar,
-body.people-workspace #doc-preview-content {
+body.people-workspace #doc-preview-content,
+body.reflections-workspace #file-root-tabs,
+body.reflections-workspace #file-tree,
+body.reflections-workspace #doc-view-tabs,
+body.reflections-workspace #doc-preview-toolbar,
+body.reflections-workspace #doc-preview-content {
   display: none;
 }
 
@@ -789,4 +797,140 @@ body.people-workspace #doc-preview-content {
 .people-doc {
   width: 100%;
   white-space: pre-wrap;
+}
+
+#reflections-browser[hidden] {
+  display: none;
+}
+
+#reflections-browser:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+#reflections-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  align-items: center;
+}
+
+#reflections-search {
+  flex: 1 1 120px;
+  min-width: 100px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  padding: 2px 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.reflections-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line, #ddd);
+  margin-bottom: 8px;
+}
+
+.reflections-folder {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reflections-folder.active {
+  color: var(--text, inherit);
+  background: var(--surface-2, #f3f0e8);
+  border-radius: 6px;
+}
+
+#reflections-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.reflections-row {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.reflections-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+#reflections-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+.reflections-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+}
+
+.reflections-editor input,
+.reflections-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg, #fff);
+  color: var(--text, inherit);
+  font: inherit;
+}
+
+.reflections-editor textarea {
+  min-height: 280px;
+  flex: 1;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.reflections-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reflections-actions button {
+  border: 1px solid var(--line, #ddd);
+  background: transparent;
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.reflections-path {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
 }

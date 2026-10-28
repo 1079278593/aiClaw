@@ -55,13 +55,15 @@ export function createChatFeature({
     const person = state.workspace === "people" ? state.personThread : null;
     const captureJob = person?.captureJob;
     if (person) person.captureJob = undefined;
-    // 乐观气泡与后端 payload 共用同一份引用上下文（人物工作区用人物预览，否则用文档预览）
+    // 乐观气泡与后端 payload 共用同一份引用上下文（人物 / 心得 / 文档）
     const previewContext = person
       ? {
           ...(person.previewPath ? { previewPath: person.previewPath } : {}),
           ...(person.selectedText ? { selectedPreviewText: person.selectedText } : {}),
         }
-      : documents.getPreviewContextPayload();
+      : state.workspace === "reflections" && state.reflectionPreview?.previewPath
+        ? { previewPath: state.reflectionPreview.previewPath }
+        : documents.getPreviewContextPayload();
     setSendDisabled(true);
     state.pendingUserBubble = renderer.appendMessage("user", buildUserMessageContent(content, images), undefined, {
       scroll: false,
