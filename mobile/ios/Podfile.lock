@@ -62,17 +62,17 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/speech_to_text/darwin"
 
 SPEC CHECKSUMS:
-  audio_session: 19e9480dbdd4e5f6c4543826b2e8b0e4ab6145fe
+  audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
   CwlCatchException: 7acc161b299a6de7f0a46a6ed741eae2c8b4d75a
   CwlCatchExceptionSupport: 54ccab8d8c78907b57f99717fb19d4cc3bce02dc
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
-  flutter_secure_storage: d33dac7ae2ea08509be337e775f6b59f1ff45f12
-  image_picker_ios: 4839114eaa8338ecff94cde6d0ae6022c30aa6fb
-  just_audio: a42c63806f16995daf5b219ae1d679deb76e6a79
-  package_info_plus: c0502532a26c7662a62a356cebe2692ec5fe4ec4
-  record_ios: 3b171007ae5de51221a3a76d2b379a7105ca98b5
-  shared_preferences_foundation: 9a36184bb1299692bf7b972bd6c60ab373084504
-  speech_to_text: 87bf9298952e8d9073be1b6aade6d5758db5170c
+  flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
+  image_picker_ios: 9285ee31b06d6e15629dd5713b890f0c457a0a8b
+  just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
+  record_ios: 980fd386a97a35987d0fce3dfda4b26a38c90f4c
+  shared_preferences_foundation: a7c3904f2dedb3701dd1903cb152ef5e7df92422
+  speech_to_text: 3b313d98516d3d0406cea424782ec25470c59d19
 
 PODFILE CHECKSUM: ad28b126eea73a6e7ef55ca76bdd6e9a0ed41cc3
 
