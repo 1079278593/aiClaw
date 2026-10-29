@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
@@ -12,6 +13,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
+import '../src/reflection_body.dart';
 import 'chat_page.dart';
 
 class ReflectionPage extends StatefulWidget {
@@ -28,22 +30,6 @@ class ReflectionPage extends StatefulWidget {
 
   @override
   State<ReflectionPage> createState() => _ReflectionPageState();
-}
-
-class _ReflectionMediaItem {
-  const _ReflectionMediaItem({
-    required this.kind,
-    required this.src,
-    this.id = '',
-    this.transcript = '',
-    this.alt = '',
-  });
-
-  final String kind; // audio | image
-  final String id;
-  final String src;
-  final String transcript;
-  final String alt;
 }
 
 class _ReflectionPageState extends State<ReflectionPage> {
@@ -65,14 +51,20 @@ class _ReflectionPageState extends State<ReflectionPage> {
   var _uploadingMedia = false;
   var _speechReady = false;
   String _speechDraft = '';
-  String? _playingSrc;
+  String? _transportSrc;
+  String? _loadedSrc;
+  StreamSubscription<PlayerState>? _playerSub;
   Timer? _debounce;
+  List<ReflectionPiece> _pieces = [ReflectionPiece.text('')];
+  List<TextEditingController> _pieceControllers = [];
+  int _pieceKey = 0;
+  final Map<String, String> _localAudio = {};
+  final Map<String, Duration> _audioDuration = {};
   static const _autosaveDelay = Duration(milliseconds: 1000);
   static final _audioBlockRe = RegExp(
-    r'^:::aiclaw-audio\[([^\]]*)\]\r?\n([\s\S]*?)^:::\s*$',
+    r'^:::aiclaw-audio\[([^\]]*)\]\r?\n([\s\S]*?)^:::[ \t]*$',
     multiLine: true,
   );
-  static final _imageMdRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
 
   @override
   void initState() {
@@ -80,6 +72,10 @@ class _ReflectionPageState extends State<ReflectionPage> {
     _path = widget.path ?? '';
     _title.addListener(_onEdited);
     _body.addListener(_onEdited);
+    _playerSub = _player.playerStateStream.listen((_) {
+      if (mounted) setState(() {});
+    });
+    _reloadPieces();
     if (_path.isNotEmpty) {
       _load();
     }
@@ -88,8 +84,12 @@ class _ReflectionPageState extends State<ReflectionPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _playerSub?.cancel();
     _title.removeListener(_onEdited);
     _body.removeListener(_onEdited);
+    for (final controller in _pieceControllers) {
+      controller.dispose();
+    }
     unawaited(_recorder.dispose());
     unawaited(_player.dispose());
     if (_speech.isListening) unawaited(_speech.cancel());
@@ -138,6 +138,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
       });
       _title.addListener(_onEdited);
       _body.addListener(_onEdited);
+      _reloadPieces();
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -250,50 +251,62 @@ class _ReflectionPageState extends State<ReflectionPage> {
     final inserted = '$prefix$text$suffix';
     final next = '$before$inserted$after';
     final cursor = before.length + inserted.length;
+    _body.removeListener(_onEdited);
     _body.value = TextEditingValue(
       text: next,
       selection: TextSelection.collapsed(offset: cursor),
     );
-    _bodyFocus.requestFocus();
+    _body.addListener(_onEdited);
+    _reloadPieces();
+    _onEdited();
   }
 
-  List<_ReflectionMediaItem> _parseMedia(String body) {
-    final items = <_ReflectionMediaItem>[];
-    for (final match in _audioBlockRe.allMatches(body)) {
-      final attrs = _parseAttrs(match.group(1) ?? '');
-      items.add(_ReflectionMediaItem(
-        kind: 'audio',
-        id: attrs['id'] ?? '',
-        src: attrs['src'] ?? '',
-        transcript: (match.group(2) ?? '').trim(),
-      ));
+  void _reloadPieces() {
+    final next = splitReflectionBody(_body.text);
+    final key = Object.hashAll(next.map((piece) => piece.kind == 'text' ? 'text' : piece.raw));
+    _pieces = next;
+    if (key == _pieceKey && _pieceControllers.length == next.where((piece) => piece.kind == 'text').length) {
+      return;
     }
-    for (final match in _imageMdRe.allMatches(body)) {
-      final src = match.group(2) ?? '';
-      if (!src.contains('.assets/')) continue;
-      items.add(_ReflectionMediaItem(
-        kind: 'image',
-        src: src,
-        alt: match.group(1) ?? '',
-      ));
+    final retired = _pieceControllers;
+    _pieceKey = key;
+    _pieceControllers = [];
+    for (final piece in next.where((piece) => piece.kind == 'text')) {
+      final controller = TextEditingController(text: piece.text);
+      controller.addListener(() => _onPieceText(controller));
+      _pieceControllers.add(controller);
     }
-    return items;
-  }
-
-  Map<String, String> _parseAttrs(String raw) {
-    final out = <String, String>{};
-    final parts = RegExp(r'(?:[^\s"]+|"[^"]*")+').allMatches(raw);
-    for (final part in parts) {
-      final token = part.group(0) ?? '';
-      final eq = token.indexOf('=');
-      if (eq <= 0) continue;
-      var value = token.substring(eq + 1).trim();
-      if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-        value = value.substring(1, value.length - 1);
+    for (final piece in next.where((piece) => piece.kind == 'audio')) {
+      unawaited(_ensureDuration(piece));
+    }
+    if (retired.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final controller in retired) {
+        if (!_pieceControllers.contains(controller)) controller.dispose();
       }
-      out[token.substring(0, eq).trim()] = value;
+    });
+  }
+
+  void _onPieceText(TextEditingController controller) {
+    if (!_pieceControllers.contains(controller)) return;
+    var textIndex = 0;
+    final next = <ReflectionPiece>[];
+    for (final piece in _pieces) {
+      if (piece.kind != 'text') {
+        next.add(piece);
+        continue;
+      }
+      final current = textIndex < _pieceControllers.length ? _pieceControllers[textIndex] : null;
+      textIndex += 1;
+      next.add(identical(current, controller) ? piece.withText(controller.text) : piece);
     }
-    return out;
+    _pieces = next;
+    final composed = composeReflectionBody(next);
+    if (_body.text == composed) return;
+    _body.removeListener(_onEdited);
+    _body.text = composed;
+    _body.addListener(_onEdited);
+    _onEdited();
   }
 
   String _resolveMediaPath(String src) {
@@ -433,40 +446,98 @@ class _ReflectionPageState extends State<ReflectionPage> {
     }
   }
 
-  Future<void> _togglePlay(_ReflectionMediaItem item) async {
+  Future<void> _usePlaybackSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      avAudioSessionMode: AVAudioSessionMode.spokenAudio,
+      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
+    ));
+    await session.setActive(true);
+  }
+
+  Future<String?> _ensureAudioFile(ReflectionPiece item) async {
+    final cached = _localAudio[item.src];
+    if (cached != null && File(cached).existsSync()) return cached;
     final mediaPath = _resolveMediaPath(item.src);
-    if (mediaPath.isEmpty) return;
-    if (_playingSrc == item.src && _player.playing) {
+    if (mediaPath.isEmpty) return null;
+    final bytes = await widget.controller.api.getBytes(
+      apiUri(widget.controller.baseUrl, '/api/reflections/media', {'path': mediaPath}),
+      token: widget.controller.token,
+    );
+    if (bytes.length < 32) throw ApiException(500, '录音文件是空的');
+    final dir = await getTemporaryDirectory();
+    final safeId = item.id.isEmpty ? '${item.src.hashCode}' : item.id;
+    final file = File('${dir.path}/reflection_$safeId.m4a');
+    await file.writeAsBytes(bytes, flush: true);
+    _localAudio[item.src] = file.path;
+    return file.path;
+  }
+
+  Future<void> _ensureDuration(ReflectionPiece item) async {
+    if (_audioDuration.containsKey(item.src)) return;
+    try {
+      final path = await _ensureAudioFile(item);
+      if (path == null) return;
+      final probe = AudioPlayer();
+      try {
+        await probe.setFilePath(path);
+        final duration = probe.duration;
+        if (duration != null) _audioDuration[item.src] = duration;
+      } finally {
+        await probe.dispose();
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _loadSource(ReflectionPiece item, String path) async {
+    if (_loadedSrc == item.src && _player.duration != null) return;
+    await _player.setFilePath(path);
+    _loadedSrc = item.src;
+    final duration = _player.duration;
+    if (duration != null) _audioDuration[item.src] = duration;
+  }
+
+  Future<void> _togglePlay(ReflectionPiece item) async {
+    _transportSrc = item.src;
+    if (_loadedSrc == item.src && _player.playing) {
       await _player.pause();
       if (mounted) setState(() {});
       return;
     }
     try {
-      final bytes = await widget.controller.api.getBytes(
-        apiUri(widget.controller.baseUrl, '/api/reflections/media', {
-          'path': mediaPath,
-        }),
-        token: widget.controller.token,
-      );
-      final dir = await getTemporaryDirectory();
-      final file = File(
-        '${dir.path}/play_${DateTime.now().millisecondsSinceEpoch}.m4a',
-      );
-      await file.writeAsBytes(bytes, flush: true);
-      await _player.setFilePath(file.path);
-      _playingSrc = item.src;
+      await _usePlaybackSession();
+      final path = await _ensureAudioFile(item);
+      if (path == null) throw ApiException(404, '找不到录音');
+      await _loadSource(item, path);
       await _player.play();
       if (mounted) setState(() {});
-      _player.playerStateStream.listen((state) {
-        if (state.processingState == ProcessingState.completed) {
-          _playingSrc = null;
-          if (mounted) setState(() {});
-        }
-      });
-    } on ApiException catch (error) {
+    } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error.message)));
+      final message = error is ApiException ? error.message : '无法播放：$error';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  Future<void> _seekBy(ReflectionPiece item, int seconds) async {
+    _transportSrc = item.src;
+    try {
+      await _usePlaybackSession();
+      final path = await _ensureAudioFile(item);
+      if (path == null) throw ApiException(404, '找不到录音');
+      await _loadSource(item, path);
+      final duration = _player.duration ?? _audioDuration[item.src] ?? Duration.zero;
+      var next = _player.position + Duration(seconds: seconds);
+      if (next < Duration.zero) next = Duration.zero;
+      if (duration > Duration.zero && next > duration) next = duration;
+      await _player.seek(next);
+      if (!_player.playing) await _player.play();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      final message = error is ApiException ? error.message : '无法播放：$error';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -523,7 +594,6 @@ class _ReflectionPageState extends State<ReflectionPage> {
   Widget build(BuildContext context) {
     final titleStyle = Theme.of(context).textTheme.headlineSmall;
     final bodyStyle = Theme.of(context).textTheme.bodyMedium;
-    final mediaItems = _parseMedia(_body.text);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -587,18 +657,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
                         onSubmitted: (_) => _bodyFocus.requestFocus(),
                         onChanged: (_) => setState(() {}),
                       ),
-                      TextField(
-                        controller: _body,
-                        focusNode: _bodyFocus,
-                        style: bodyStyle,
-                        decoration: const InputDecoration(
-                          hintText: '正文',
-                          border: InputBorder.none,
-                        ),
-                        keyboardType: TextInputType.multiline,
-                        maxLines: null,
-                        minLines: 12,
-                      ),
+                      ..._bodyPieces(bodyStyle),
                       if (_recording && _speechDraft.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
@@ -609,76 +668,166 @@ class _ReflectionPageState extends State<ReflectionPage> {
                                 ),
                           ),
                         ),
-                      if (mediaItems.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          '文内附件',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        ...mediaItems.map((item) => _buildMediaTile(item)),
-                      ],
                     ],
                   ),
       ),
     );
   }
 
-  Widget _buildMediaTile(_ReflectionMediaItem item) {
-    if (item.kind == 'image') {
-      final mediaPath = _resolveMediaPath(item.src);
-      return Card(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: mediaPath.isEmpty
-              ? Text(item.alt.isEmpty ? '图片' : item.alt)
-              : FutureBuilder<Uint8List>(
-                  future: widget.controller.api.getBytes(
-                    apiUri(
-                      widget.controller.baseUrl,
-                      '/api/reflections/media',
-                      {'path': mediaPath},
-                    ),
-                    token: widget.controller.token,
-                  ),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const SizedBox(
-                        height: 80,
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    return Image.memory(
-                      snapshot.data!,
-                      height: 160,
-                      fit: BoxFit.contain,
-                    );
-                  },
-                ),
-        ),
-      );
+  List<Widget> _bodyPieces(TextStyle? bodyStyle) {
+    var textIndex = 0;
+    final children = <Widget>[];
+    for (final piece in _pieces) {
+      if (piece.kind == 'text') {
+        if (textIndex >= _pieceControllers.length) break;
+        final controller = _pieceControllers[textIndex];
+        textIndex += 1;
+        children.add(TextField(
+          controller: controller,
+          focusNode: textIndex == 1 ? _bodyFocus : null,
+          style: bodyStyle,
+          decoration: InputDecoration(
+            hintText: textIndex == 1 ? '正文' : null,
+            border: InputBorder.none,
+            isCollapsed: textIndex != 1,
+          ),
+          keyboardType: TextInputType.multiline,
+          maxLines: null,
+          minLines: textIndex == 1 && _pieces.length == 1 ? 12 : 1,
+        ));
+      } else if (piece.kind == 'audio') {
+        children.add(_audioCard(piece));
+      } else if (piece.kind == 'image') {
+        children.add(_imageBlock(piece));
+      }
     }
-    final playing = _playingSrc == item.src && _player.playing;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: IconButton(
-          onPressed: () => unawaited(_togglePlay(item)),
-          icon: Icon(playing ? Icons.pause_circle_outline : Icons.play_circle_outline),
-        ),
-        title: Text(item.transcript.isEmpty ? '语音' : item.transcript),
-        subtitle: const Text('原声保留'),
-        trailing: IconButton(
-          tooltip: '改转写草稿',
-          onPressed: () => unawaited(_editTranscript(item)),
-          icon: const Icon(Icons.edit_note_outlined),
+    return children;
+  }
+
+  Widget _audioCard(ReflectionPiece item) {
+    final scheme = Theme.of(context).colorScheme;
+    final playing = _loadedSrc == item.src && _player.playing;
+    final showTransport = _transportSrc == item.src;
+    final when = audioRecordedLabel(item.id);
+    final length = formatAudioLength(_audioDuration[item.src]);
+    final excerpt = item.transcript.isEmpty ? '无' : item.transcript;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('录音', style: Theme.of(context).textTheme.titleMedium),
+          if (when.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(when, style: Theme.of(context).textTheme.bodySmall),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(length, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          const Divider(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('听写文本', style: Theme.of(context).textTheme.labelLarge),
+                    const SizedBox(height: 2),
+                    GestureDetector(
+                      onLongPress: () => unawaited(_editTranscript(item)),
+                      child: Text(
+                        excerpt,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!showTransport)
+                IconButton(
+                  tooltip: '播放',
+                  onPressed: () => unawaited(_togglePlay(item)),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 32),
+                )
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _seekButton(item, -15, Icons.replay_rounded),
+                    IconButton(
+                      tooltip: playing ? '暂停' : '播放',
+                      onPressed: () => unawaited(_togglePlay(item)),
+                      icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 32),
+                    ),
+                    _seekButton(item, 15, Icons.forward_rounded),
+                  ],
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _seekButton(ReflectionPiece item, int seconds, IconData icon) {
+    final label = seconds.abs().toString();
+    return IconButton(
+      tooltip: seconds < 0 ? '倒退 $label 秒' : '前进 $label 秒',
+      onPressed: () => unawaited(_seekBy(item, seconds)),
+      icon: SizedBox(
+        width: 32,
+        height: 32,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, size: 28),
+            Text(label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+          ],
         ),
       ),
     );
   }
 
-  Future<void> _editTranscript(_ReflectionMediaItem item) async {
+  Widget _imageBlock(ReflectionPiece item) {
+    final mediaPath = _resolveMediaPath(item.src);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: mediaPath.isEmpty
+          ? Text(item.alt.isEmpty ? '图片' : item.alt)
+          : FutureBuilder<Uint8List>(
+              future: widget.controller.api.getBytes(
+                apiUri(widget.controller.baseUrl, '/api/reflections/media', {'path': mediaPath}),
+                token: widget.controller.token,
+              ),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) return const Text('图片无法加载');
+                if (!snapshot.hasData) {
+                  return const SizedBox(
+                    height: 80,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(snapshot.data!, fit: BoxFit.contain),
+                );
+              },
+            ),
+    );
+  }
+
+  Future<void> _editTranscript(ReflectionPiece item) async {
     final controller = TextEditingController(text: item.transcript);
     final next = await showDialog<String>(
       context: context,
@@ -720,7 +869,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
     final body = _body.text;
     RegExpMatch? match;
     for (final candidate in _audioBlockRe.allMatches(body)) {
-      final attrs = _parseAttrs(candidate.group(1) ?? '');
+      final attrs = parseReflectionAttrs(candidate.group(1) ?? '');
       final hit = item.id.isNotEmpty
           ? attrs['id'] == item.id
           : attrs['src'] == item.src;
@@ -735,12 +884,16 @@ class _ReflectionPageState extends State<ReflectionPage> {
       );
       return;
     }
-    final attrs = _parseAttrs(match.group(1) ?? '');
+    final attrs = parseReflectionAttrs(match.group(1) ?? '');
     final replacement =
         ':::aiclaw-audio[id=${attrs['id'] ?? item.id} src="${attrs['src'] ?? item.src}"]\n${next.trim()}\n:::';
+    _body.removeListener(_onEdited);
     _body.value = TextEditingValue(
       text: body.replaceRange(match.start, match.end, replacement),
     );
+    _body.addListener(_onEdited);
+    _reloadPieces();
+    _onEdited();
   }
 
   Future<bool> _confirmLeave() async {

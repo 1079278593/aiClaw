@@ -151,8 +151,9 @@ export function createReflectionsFeature({ state, actions }) {
             <button type="button" id="reflection-record" class="${recording ? "recording" : ""}">${recording ? "结束录音" : "录音"}</button>
             <input id="reflection-image-file" type="file" accept="image/*" hidden>
           </div>
-          <textarea id="reflection-body" placeholder="正文">${escHtml(draft?.body || "")}</textarea>
-          <div id="reflection-media-preview" class="reflections-media-preview"></div>
+          <textarea id="reflection-body" hidden>${escHtml(draft?.body || "")}</textarea>
+          <div id="reflection-composed" class="reflection-composed"></div>
+          <div id="reflection-media-preview" class="reflections-media-preview" hidden></div>
           <div id="reflection-assets-overview" class="reflections-assets-overview"></div>
           <div class="reflections-actions">
             <span id="reflection-save-status" class="reflections-save-status">${escHtml(statusLabel())}</span>
@@ -193,7 +194,7 @@ export function createReflectionsFeature({ state, actions }) {
     stage.querySelector("#reflection-title")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        stage.querySelector("#reflection-body")?.focus();
+        stage.querySelector(".reflection-piece-text")?.focus();
       }
     });
     stage.querySelector("#reflection-new")?.addEventListener("click", () => void beginNew());
@@ -318,67 +319,175 @@ export function createReflectionsFeature({ state, actions }) {
     return url;
   }
 
-  async function renderMediaPreview() {
-    const host = document.getElementById("reflection-media-preview");
-    if (!host) return;
-    const notePath = draft?.path || currentPath;
-    const body = document.getElementById("reflection-body")?.value ?? draft?.body ?? "";
-    if (!notePath || !body.trim()) {
-      revokeBlobUrls();
-      host.innerHTML = "";
-      return;
-    }
-    const generation = ++mediaPreviewGeneration;
-    const blocks = [];
-    AUDIO_BLOCK_RE.lastIndex = 0;
-    let match;
-    while ((match = AUDIO_BLOCK_RE.exec(body))) {
-      const attrs = parseAudioAttrs(match[1]);
-      blocks.push({
-        kind: "audio",
-        id: attrs.id || "",
-        src: attrs.src || "",
-        transcript: String(match[2] || "").trim(),
-      });
-    }
-    IMAGE_MD_RE.lastIndex = 0;
-    while ((match = IMAGE_MD_RE.exec(body))) {
-      const src = match[2] || "";
-      if (!src.includes(".assets/")) continue;
-      blocks.push({ kind: "image", alt: match[1] || "", src });
-    }
-    if (!blocks.length) {
-      revokeBlobUrls();
-      host.innerHTML = "";
-      return;
-    }
-    revokeBlobUrls();
-    const parts = await Promise.all(blocks.map(async (block, index) => {
-      const mediaPath = resolveMediaPath(notePath, block.src);
-      try {
-        const url = await mediaBlobUrl(mediaPath);
-        if (block.kind === "audio") {
-          return `<figure class="reflection-media-block reflection-audio-block" data-audio-index="${index}">
-            <audio controls preload="metadata" src="${url}"></audio>
-            ${block.transcript ? `<figcaption>${escHtml(block.transcript)}</figcaption>` : `<figcaption class="muted">语音</figcaption>`}
-            <button type="button" class="reflection-retranscribe" data-audio-id="${escHtml(block.id || "")}">改转写草稿</button>
-          </figure>`;
-        }
-        return `<figure class="reflection-media-block reflection-image-block">
-          <img src="${url}" alt="${escHtml(block.alt || "")}" loading="lazy">
-        </figure>`;
-      } catch {
-        return `<p class="empty-state-copy">无法加载 ${escHtml(block.src || "")}</p>`;
+  function syncBodyFromPieces() {
+    const hidden = document.getElementById("reflection-body");
+    const host = document.getElementById("reflection-composed");
+    if (!hidden || !host) return;
+    hidden.value = [...host.children].map((el) => {
+      if (el.classList.contains("reflection-piece-text-wrap")) {
+        return el.querySelector("textarea")?.value ?? "";
       }
-    }));
-    if (generation !== mediaPreviewGeneration) return;
-    host.innerHTML = `<div class="reflections-media-preview-title">文内预览</div>${parts.join("")}`;
-    host.querySelectorAll(".reflection-retranscribe").forEach((button) => {
-      button.addEventListener("click", () => {
-        const id = button.dataset.audioId || "";
-        void editAudioTranscript(id);
-      });
+      return el._raw || "";
+    }).join("");
+  }
+
+  function splitReflectionPieces(body) {
+    const re = /^:::aiclaw-audio\[([^\]]*)\]\r?\n([\s\S]*?)^:::[ \t]*$|!\[([^\]]*)\]\(([^)\s]*\.assets\/[^)\s]+)\)/gm;
+    const pieces = [];
+    let index = 0;
+    let match;
+    while ((match = re.exec(body))) {
+      if (match.index > index) pieces.push({ kind: "text", text: body.slice(index, match.index) });
+      if (match[0].startsWith(":::")) {
+        const attrs = parseAudioAttrs(match[1]);
+        pieces.push({
+          kind: "audio",
+          raw: match[0],
+          id: attrs.id || "",
+          src: attrs.src || "",
+          transcript: String(match[2] || "").trim(),
+        });
+      } else {
+        pieces.push({ kind: "image", raw: match[0], alt: match[3] || "", src: match[4] || "" });
+      }
+      index = match.index + match[0].length;
+    }
+    if (index < body.length || pieces.length === 0) pieces.push({ kind: "text", text: body.slice(index) });
+    if (pieces[pieces.length - 1].kind !== "text") pieces.push({ kind: "text", text: "" });
+    return pieces;
+  }
+
+  function audioRecordedLabel(id) {
+    const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(id || "");
+    if (!match) return "";
+    const date = new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]));
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function formatAudioLength(seconds) {
+    if (!Number.isFinite(seconds)) return "--:--";
+    const total = Math.max(0, Math.floor(seconds));
+    const rest = String(total % 60).padStart(2, "0");
+    const hours = Math.floor(total / 3600);
+    if (hours > 0) return `${hours}:${String(Math.floor(total / 60) % 60).padStart(2, "0")}:${rest}`;
+    return `${Math.floor(total / 60)}:${rest}`;
+  }
+
+  function bindAudioCard(card, audio, id) {
+    const play = card.querySelector(".note-audio-play");
+    const back = card.querySelector(".note-audio-back");
+    const forward = card.querySelector(".note-audio-forward");
+    const length = card.querySelector(".note-audio-duration");
+    const setTransport = (open) => {
+      if (back) back.hidden = !open;
+      if (forward) forward.hidden = !open;
+    };
+    audio.addEventListener("loadedmetadata", () => {
+      if (length) length.textContent = formatAudioLength(audio.duration);
     });
+    audio.addEventListener("pause", () => {
+      if (play) play.textContent = "▶";
+    });
+    audio.addEventListener("playing", () => {
+      if (play) play.textContent = "❚❚";
+      setTransport(true);
+    });
+    play?.addEventListener("click", () => {
+      setTransport(true);
+      if (!audio?.src) return;
+      if (audio.paused) {
+        audio.play().catch(() => {
+          if (length) length.textContent = "无法播放";
+        });
+      } else {
+        audio.pause();
+      }
+    });
+    const seek = (delta) => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime;
+      audio.currentTime = Math.min(duration, Math.max(0, audio.currentTime + delta));
+      if (audio.paused) void audio.play();
+    };
+    back?.addEventListener("click", () => seek(-15));
+    forward?.addEventListener("click", () => seek(15));
+    card.querySelector(".note-audio-excerpt")?.addEventListener("dblclick", () => editAudioTranscript(id));
+  }
+
+  async function renderMediaPreview() {
+    const host = document.getElementById("reflection-composed");
+    const hidden = document.getElementById("reflection-body");
+    if (!host || !hidden) return;
+    const notePath = draft?.path || currentPath;
+    const body = hidden.value ?? draft?.body ?? "";
+    const generation = ++mediaPreviewGeneration;
+    const pieces = splitReflectionPieces(body);
+    revokeBlobUrls();
+    host.replaceChildren();
+    for (const piece of pieces) {
+      if (generation !== mediaPreviewGeneration) return;
+      if (piece.kind === "text") {
+        const wrap = document.createElement("div");
+        wrap.className = "reflection-piece-text-wrap";
+        const area = document.createElement("textarea");
+        area.className = "reflection-piece-text";
+        area.placeholder = pieces.length === 1 ? "正文" : "";
+        area.value = piece.text;
+        area.addEventListener("input", () => {
+          syncBodyFromPieces();
+          dirty = true;
+          saveStatus = "";
+          updateSaveStatus();
+          scheduleAutosave();
+        });
+        area.addEventListener("blur", () => void flushAutosave());
+        wrap.append(area);
+        host.append(wrap);
+        continue;
+      }
+      const block = document.createElement("div");
+      block.className = piece.kind === "audio" ? "note-audio" : "reflection-image-piece";
+      block._raw = piece.raw;
+      if (piece.kind === "image") {
+        try {
+          const url = notePath ? await mediaBlobUrl(resolveMediaPath(notePath, piece.src)) : "";
+          block.innerHTML = url
+            ? `<img src="${url}" alt="${escHtml(piece.alt || "")}">`
+            : `<p class="empty-state-copy">无法加载图片</p>`;
+        } catch {
+          block.innerHTML = `<p class="empty-state-copy">无法加载图片</p>`;
+        }
+        host.append(block);
+        continue;
+      }
+      const when = audioRecordedLabel(piece.id);
+      const excerpt = piece.transcript || "无";
+      block.innerHTML = `
+        <div class="note-audio-title">录音</div>
+        ${when ? `<div class="note-audio-time">${escHtml(when)}</div>` : ""}
+        <div class="note-audio-duration">--:--</div>
+        <hr>
+        <div class="note-audio-bottom">
+          <div>
+            <div class="note-audio-label">听写文本</div>
+            <div class="note-audio-excerpt">${escHtml(excerpt)}</div>
+          </div>
+          <div class="note-audio-controls">
+            <button type="button" class="note-audio-back" hidden aria-label="倒退15秒">15</button>
+            <button type="button" class="note-audio-play" aria-label="播放">▶</button>
+            <button type="button" class="note-audio-forward" hidden aria-label="前进15秒">15</button>
+          </div>
+        </div>
+        <audio preload="metadata"></audio>`;
+      const audio = block.querySelector("audio");
+      try {
+        if (notePath && audio) audio.src = await mediaBlobUrl(resolveMediaPath(notePath, piece.src));
+      } catch {
+        block.querySelector(".note-audio-duration").textContent = "无法播放";
+      }
+      bindAudioCard(block, audio, piece.id);
+      host.append(block);
+    }
     void renderAssetsOverview();
   }
 
@@ -442,6 +551,34 @@ export function createReflectionsFeature({ state, actions }) {
   }
 
   function insertTextAtCaret(textarea, text) {
+    const active = document.activeElement;
+    if (active?.classList?.contains("reflection-piece-text")) {
+      const start = active.selectionStart ?? active.value.length;
+      const end = active.selectionEnd ?? start;
+      active.value = `${active.value.slice(0, start)}${text}${active.value.slice(end)}`;
+      syncBodyFromPieces();
+      dirty = true;
+      saveStatus = "";
+      updateSaveStatus();
+      scheduleAutosave();
+      scheduleMediaPreview();
+      return;
+    }
+    const pieces = [...document.querySelectorAll(".reflection-piece-text")];
+    const last = pieces[pieces.length - 1];
+    if (last) {
+      const start = document.activeElement === last
+        ? (last.selectionStart ?? last.value.length)
+        : last.value.length;
+      last.value = `${last.value.slice(0, start)}${text}${last.value.slice(start)}`;
+      syncBodyFromPieces();
+      dirty = true;
+      saveStatus = "";
+      updateSaveStatus();
+      scheduleAutosave();
+      scheduleMediaPreview();
+      return;
+    }
     if (!textarea) return;
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? start;

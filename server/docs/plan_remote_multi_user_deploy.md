@@ -120,7 +120,7 @@ $AICLAW_DATA_DIR/                    # 环境变量仍指向「安装根」
 |------|------|
 | 4.1 | `deploy/docker-compose-aiclaw.yml`：单服务，挂载 `AICLAW_DATA_DIR` 卷，`127.0.0.1:3000` 或仅 bridge 内网口 |
 | 4.2 | `deploy/aiclaw.env.example`：`AICLAW_DATA_DIR=/volume/...`，**不含** LLM Key |
-| 4.3 | `deploy/script/docker-export-for-nas.sh` + `导出镜像到NAS.command` |
+| 4.3 | `deploy/script/docker-export-for-nas.sh`，入口是 `deploy/发布.command` 的第 2 项 |
 | 4.4 | `deploy/部署文档.md`：NAS 导入镜像、创建项目、验收 `GET /health`、带 Bearer 测 `/api/config` |
 | 4.5 | **附录：frp + 阿里云 HTTPS**（运维文档，非应用代码）：Nginx TLS → frps → NAS:3000；frp token；**禁止**公网 HTTP |
 | 4.6 | 备份说明：NAS 快照 `tenants/` + `auth/` |

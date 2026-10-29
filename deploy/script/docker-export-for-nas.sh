@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mac 双击请运行：deploy/导出镜像到NAS.command
+# Mac 双击请运行：deploy/发布.command，再选 2。
 # 只构建服务端镜像。不拷贝 .env，不拷贝用户数据，不把手机端打进镜像。
 set -euo pipefail
 

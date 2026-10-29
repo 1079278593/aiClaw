@@ -1017,6 +1017,82 @@ body.reflections-workspace #doc-preview-content {
   color: var(--muted);
 }
 
+.reflection-composed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reflection-piece-text {
+  width: 100%;
+  min-height: 4.5em;
+  border: 0;
+  resize: vertical;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+}
+.note-audio {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 12px 10px 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2, #f3f0e8);
+}
+.note-audio-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+.note-audio-time,
+.note-audio-duration,
+.note-audio-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.note-audio hr {
+  border: 0;
+  border-top: 1px solid var(--line, #ddd);
+  margin: 8px 0;
+}
+.note-audio-bottom {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.note-audio-bottom > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.note-audio-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text, inherit);
+  font-size: 15px;
+}
+.note-audio-controls {
+  display: flex;
+  align-items: center;
+}
+.note-audio-controls button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.note-audio audio,
+.reflection-image-piece audio {
+  display: none;
+}
+.reflection-image-piece img {
+  max-width: 100%;
+  border-radius: 12px;
+}
 .reflections-media-preview {
   display: flex;
   flex-direction: column;

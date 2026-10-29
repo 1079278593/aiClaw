@@ -30,7 +30,7 @@ fail() {
 }
 
 ssh_nas() {
-  ssh -p "$NAS_SSH_PORT" -o ConnectTimeout=10 "$NAS_SSH" "$@"
+  ssh -p "$NAS_SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 "$NAS_SSH" "$@"
 }
 
 usage() {
