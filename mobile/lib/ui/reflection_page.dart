@@ -448,10 +448,10 @@ class _ReflectionPageState extends State<ReflectionPage> {
 
   Future<void> _usePlaybackSession() async {
     final session = await AudioSession.instance;
+    // defaultToSpeaker 只能配 playAndRecord。配在 playback 上会得到 OSStatus -50。
     await session.configure(const AudioSessionConfiguration(
       avAudioSessionCategory: AVAudioSessionCategory.playback,
       avAudioSessionMode: AVAudioSessionMode.spokenAudio,
-      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
     ));
     await session.setActive(true);
   }
@@ -716,8 +716,9 @@ class _ReflectionPageState extends State<ReflectionPage> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
+        color: scheme.brightness == Brightness.dark ? const Color(0xFF2C2C2C) : Colors.white,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.onSurface.withValues(alpha: 0.28)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -732,7 +733,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
             padding: const EdgeInsets.only(top: 2),
             child: Text(length, style: Theme.of(context).textTheme.bodySmall),
           ),
-          const Divider(height: 16),
+          Divider(height: 16, color: scheme.onSurface.withValues(alpha: 0.2)),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

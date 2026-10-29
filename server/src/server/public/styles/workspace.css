@@ -1018,27 +1018,34 @@ body.reflections-workspace #doc-preview-content {
 }
 
 .reflection-composed {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.reflection-piece-text {
-  width: 100%;
-  min-height: 4.5em;
-  border: 0;
-  resize: vertical;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  min-height: 12em;
+  outline: none;
   font-size: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reflection-composed:focus {
+  outline: none;
+}
+.reflection-composed:empty::before {
+  content: "正文";
+  color: var(--muted);
+}
+.note-audio,
+.reflection-image-piece {
+  white-space: normal;
 }
 .note-audio {
+  display: block;
   width: 100%;
   box-sizing: border-box;
   margin: 8px 0;
   padding: 12px 10px 12px 14px;
+  border: 1px solid var(--border, #c3bead);
   border-radius: 14px;
-  background: var(--surface-2, #f3f0e8);
+  background: var(--bg3, #f4eedc);
+  color: var(--text1, inherit);
+  user-select: none;
 }
 .note-audio-title {
   font-size: 17px;

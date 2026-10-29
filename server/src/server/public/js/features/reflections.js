@@ -194,7 +194,7 @@ export function createReflectionsFeature({ state, actions }) {
     stage.querySelector("#reflection-title")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        stage.querySelector(".reflection-piece-text")?.focus();
+        stage.querySelector("#reflection-composed")?.focus();
       }
     });
     stage.querySelector("#reflection-new")?.addEventListener("click", () => void beginNew());
@@ -323,12 +323,67 @@ export function createReflectionsFeature({ state, actions }) {
     const hidden = document.getElementById("reflection-body");
     const host = document.getElementById("reflection-composed");
     if (!hidden || !host) return;
-    hidden.value = [...host.children].map((el) => {
-      if (el.classList.contains("reflection-piece-text-wrap")) {
-        return el.querySelector("textarea")?.value ?? "";
+    hidden.value = serializeEditor(host).after;
+  }
+
+  function serializeEditor(root, pivot = null) {
+    let before = "";
+    let after = "";
+    let passed = !pivot;
+    const append = (text) => {
+      if (passed) after += text;
+      else before += text;
+    };
+    const written = () => (passed ? after : before);
+    const walk = (node) => {
+      if (pivot && node === pivot) {
+        passed = true;
+        return;
       }
-      return el._raw || "";
-    }).join("");
+      if (node.nodeType === Node.TEXT_NODE) {
+        append(node.textContent.replace(/\u00a0/g, " "));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (node._raw) {
+        append(node._raw);
+        if (pivot && node.contains(pivot)) passed = true;
+        return;
+      }
+      if (node.tagName === "BR") {
+        if (!node.classList.contains("note-caret")) append("\n");
+        return;
+      }
+      const block = node.tagName === "DIV" || node.tagName === "P";
+      if (block && written() && !written().endsWith("\n")) append("\n");
+      for (const child of node.childNodes) walk(child);
+    };
+    for (const child of root.childNodes) walk(child);
+    return { before, after };
+  }
+
+  function appendEditorText(host, text) {
+    const lines = text.split("\n");
+    lines.forEach((line, index) => {
+      if (index > 0) host.append(document.createElement("br"));
+      if (line) host.append(document.createTextNode(line));
+    });
+  }
+
+  function bindEditor(host) {
+    if (host.dataset.bound === "1") return;
+    host.dataset.bound = "1";
+    host.contentEditable = "true";
+    host.spellcheck = false;
+    host.addEventListener("input", () => {
+      if (host.dataset.rendering === "1") return;
+      syncBodyFromPieces();
+      dirty = true;
+      saveStatus = "";
+      updateSaveStatus();
+      scheduleAutosave();
+    });
+    host.addEventListener("blur", () => void flushAutosave());
   }
 
   function splitReflectionPieces(body) {
@@ -423,31 +478,37 @@ export function createReflectionsFeature({ state, actions }) {
     const generation = ++mediaPreviewGeneration;
     const pieces = splitReflectionPieces(body);
     revokeBlobUrls();
+    bindEditor(host);
+    host.dataset.rendering = "1";
     host.replaceChildren();
+    const caret = () => {
+      const br = document.createElement("br");
+      br.className = "note-caret";
+      return br;
+    };
+    if (pieces[0]?.kind && pieces[0].kind !== "text") host.append(caret());
+    let previousMedia = false;
     for (const piece of pieces) {
-      if (generation !== mediaPreviewGeneration) return;
+      if (generation !== mediaPreviewGeneration) {
+        delete host.dataset.rendering;
+        return;
+      }
       if (piece.kind === "text") {
-        const wrap = document.createElement("div");
-        wrap.className = "reflection-piece-text-wrap";
-        const area = document.createElement("textarea");
-        area.className = "reflection-piece-text";
-        area.placeholder = pieces.length === 1 ? "正文" : "";
-        area.value = piece.text;
-        area.addEventListener("input", () => {
-          syncBodyFromPieces();
-          dirty = true;
-          saveStatus = "";
-          updateSaveStatus();
-          scheduleAutosave();
-        });
-        area.addEventListener("blur", () => void flushAutosave());
-        wrap.append(area);
-        host.append(wrap);
+        if (piece.text) appendEditorText(host, piece.text);
+        else if (pieces.some((item) => item.kind !== "text")) host.append(caret());
+        previousMedia = false;
         continue;
       }
+      if (previousMedia) host.append(caret());
+      previousMedia = true;
       const block = document.createElement("div");
       block.className = piece.kind === "audio" ? "note-audio" : "reflection-image-piece";
+      block.contentEditable = "false";
       block._raw = piece.raw;
+      block.addEventListener("mousedown", (event) => {
+        if (event.target.closest("button")) return;
+        event.preventDefault();
+      });
       if (piece.kind === "image") {
         try {
           const url = notePath ? await mediaBlobUrl(resolveMediaPath(notePath, piece.src)) : "";
@@ -488,6 +549,7 @@ export function createReflectionsFeature({ state, actions }) {
       bindAudioCard(block, audio, piece.id);
       host.append(block);
     }
+    delete host.dataset.rendering;
     void renderAssetsOverview();
   }
 
@@ -551,27 +613,23 @@ export function createReflectionsFeature({ state, actions }) {
   }
 
   function insertTextAtCaret(textarea, text) {
-    const active = document.activeElement;
-    if (active?.classList?.contains("reflection-piece-text")) {
-      const start = active.selectionStart ?? active.value.length;
-      const end = active.selectionEnd ?? start;
-      active.value = `${active.value.slice(0, start)}${text}${active.value.slice(end)}`;
-      syncBodyFromPieces();
-      dirty = true;
-      saveStatus = "";
-      updateSaveStatus();
-      scheduleAutosave();
-      scheduleMediaPreview();
-      return;
-    }
-    const pieces = [...document.querySelectorAll(".reflection-piece-text")];
-    const last = pieces[pieces.length - 1];
-    if (last) {
-      const start = document.activeElement === last
-        ? (last.selectionStart ?? last.value.length)
-        : last.value.length;
-      last.value = `${last.value.slice(0, start)}${text}${last.value.slice(start)}`;
-      syncBodyFromPieces();
+    const host = document.getElementById("reflection-composed");
+    if (host) {
+      const pivot = document.createElement("span");
+      const selection = window.getSelection();
+      if (selection?.rangeCount && host.contains(selection.anchorNode)) {
+        const range = selection.getRangeAt(0);
+        range.collapse(false);
+        range.insertNode(pivot);
+      } else {
+        host.append(pivot);
+      }
+      const { before, after } = serializeEditor(host, pivot);
+      pivot.remove();
+      const hidden = document.getElementById("reflection-body");
+      const lead = before && !before.endsWith("\n") ? "\n" : "";
+      const trail = after && !after.startsWith("\n") ? "\n" : "";
+      if (hidden) hidden.value = `${before}${lead}${text}${trail}${after}`;
       dirty = true;
       saveStatus = "";
       updateSaveStatus();
