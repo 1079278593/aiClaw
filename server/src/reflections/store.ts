@@ -5,7 +5,23 @@
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPaths } from "../config/paths.js";
+import {
+  deleteAssetsPair,
+  isAssetsDirName,
+  moveAssetsPair,
+  reflectionStem,
+  rewriteAssetsPrefixInBody,
+} from "./media.js";
 import { parseReflectionPaste } from "./parse.js";
+import {
+  ReflectionsError,
+  ROOT_REL,
+  assertUnderRoot,
+  normalizeRel,
+  reflectionsRoot,
+  resolveFolder,
+  resolveReflectionPath,
+} from "./paths.js";
 
 export type ReflectionMeta = {
   path: string;
@@ -21,68 +37,13 @@ export type ReflectionDoc = ReflectionMeta & {
   body: string;
 };
 
-export class ReflectionsError extends Error {
-  constructor(message: string, readonly statusCode: number) {
-    super(message);
-  }
-}
+export { ReflectionsError, reflectionsRoot, resolveReflectionPath };
 
-const ROOT_REL = "inputs/reflections";
 const TEXT_EXT = new Set([".md", ".txt"]);
-
-export function reflectionsRoot(userDataDir?: string): string {
-  return path.join(getPaths(userDataDir).inputs, "reflections");
-}
 
 export async function ensureReflectionsDirs(userDataDir?: string): Promise<void> {
   const root = reflectionsRoot(userDataDir);
   await mkdir(path.join(root, "inbox"), { recursive: true });
-}
-
-function normalizeRel(input: string): string {
-  return input.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
-}
-
-function assertUnderRoot(abs: string, root: string): void {
-  const resolved = path.resolve(abs);
-  const rootResolved = path.resolve(root);
-  if (resolved !== rootResolved && !resolved.startsWith(rootResolved + path.sep)) {
-    throw new ReflectionsError("路径不允许", 400);
-  }
-}
-
-/** 将用户传入的 path（完整相对或根内相对）解析为绝对路径与规范相对路径。 */
-export function resolveReflectionPath(inputPath: string, userDataDir?: string): {
-  relativePath: string;
-  absolutePath: string;
-  root: string;
-} {
-  const root = reflectionsRoot(userDataDir);
-  let rel = normalizeRel(inputPath);
-  if (rel === ROOT_REL || rel.startsWith(`${ROOT_REL}/`)) {
-    // keep
-  } else if (!rel.includes("..")) {
-    rel = `${ROOT_REL}/${rel}`;
-  } else {
-    throw new ReflectionsError("路径不允许", 400);
-  }
-  if (rel.includes("..")) throw new ReflectionsError("路径不允许", 400);
-  const absolutePath = path.resolve(getPaths(userDataDir).base, rel);
-  assertUnderRoot(absolutePath, root);
-  return { relativePath: normalizeRel(rel), absolutePath, root };
-}
-
-function resolveFolder(folder: string | undefined, userDataDir?: string): {
-  relativeFolder: string;
-  absoluteFolder: string;
-} {
-  const raw = normalizeRel(folder || "inbox") || "inbox";
-  const withoutRoot = raw === ROOT_REL ? "" : raw.startsWith(`${ROOT_REL}/`) ? raw.slice(ROOT_REL.length + 1) : raw;
-  if (withoutRoot.includes("..")) throw new ReflectionsError("路径不允许", 400);
-  const relativeFolder = withoutRoot ? `${ROOT_REL}/${withoutRoot}` : ROOT_REL;
-  const absoluteFolder = path.resolve(getPaths(userDataDir).base, relativeFolder);
-  assertUnderRoot(absoluteFolder, reflectionsRoot(userDataDir));
-  return { relativeFolder: normalizeRel(relativeFolder), absoluteFolder };
 }
 
 function stripBom(text: string): string {
@@ -167,6 +128,7 @@ async function walkFiles(dir: string, root: string, out: string[]): Promise<void
   for (const entry of entries) {
     const abs = path.join(dir, entry.name);
     if (entry.isDirectory()) {
+      if (isAssetsDirName(entry.name)) continue;
       await walkFiles(abs, root, out);
       continue;
     }
@@ -257,14 +219,23 @@ function sanitizeFilename(title: string): string {
   return cleaned || "未命名心得";
 }
 
-async function uniqueMdPath(absoluteFolder: string, relativeFolder: string, title: string): Promise<{
+async function uniqueMdPath(
+  absoluteFolder: string,
+  relativeFolder: string,
+  title: string,
+  allowAbsolute?: string,
+): Promise<{
   absolutePath: string;
   relativePath: string;
 }> {
   const baseName = sanitizeFilename(title);
+  const allow = allowAbsolute ? path.resolve(allowAbsolute) : "";
   for (let i = 0; i < 50; i++) {
     const name = i === 0 ? `${baseName}.md` : `${baseName}_${i + 1}.md`;
     const absolutePath = path.join(absoluteFolder, name);
+    if (allow && path.resolve(absolutePath) === allow) {
+      return { absolutePath, relativePath: normalizeRel(`${relativeFolder}/${name}`) };
+    }
     try {
       await stat(absolutePath);
     } catch (error) {
@@ -327,36 +298,64 @@ export async function updateReflection(input: {
   const st = await stat(absolutePath);
   const title = input.title !== undefined ? String(input.title).trim() : current.title;
   if (!title) throw new ReflectionsError("标题不能为空", 400);
+  let bodyText = input.body !== undefined ? String(input.body) : current.body;
+
+  // .txt 先视为同主名 .md，再决定是否因标题改名
+  let workAbs = absolutePath;
+  let workRel = relativePath;
+  const wasTxt = path.extname(absolutePath).toLowerCase() === ".txt";
+  if (wasTxt) {
+    workAbs = absolutePath.replace(/\.txt$/i, ".md");
+    workRel = relativePath.replace(/\.txt$/i, ".md");
+  }
+
+  let destAbs = workAbs;
+  let destRel = workRel;
+  const oldStem = reflectionStem(workRel);
+  const desiredStem = sanitizeFilename(title);
+  if (desiredStem !== oldStem) {
+    const folderAbs = path.dirname(workAbs);
+    const folderRel = path.posix.dirname(workRel);
+    const unique = await uniqueMdPath(folderAbs, folderRel, title, workAbs);
+    destAbs = unique.absolutePath;
+    destRel = unique.relativePath;
+    bodyText = rewriteAssetsPrefixInBody(bodyText, oldStem, reflectionStem(destRel));
+  }
+
   const content = serializeDoc({
     title,
     occurredAt: input.occurredAt !== undefined ? String(input.occurredAt).trim() || current.occurredAt : current.occurredAt,
     context: input.context !== undefined ? String(input.context).trim() : current.context,
     createdAt: current.createdAt || fileCreatedAt(st),
     updatedAt: now,
-    body: input.body !== undefined ? String(input.body) : current.body,
+    body: bodyText,
   });
-  // .txt 首次保存为同主名 .md
-  let targetAbs = absolutePath;
-  let targetRel = relativePath;
-  if (path.extname(absolutePath).toLowerCase() === ".txt") {
-    targetAbs = absolutePath.replace(/\.txt$/i, ".md");
-    targetRel = relativePath.replace(/\.txt$/i, ".md");
-    await writeAtomic(targetAbs, content);
+  await writeAtomic(destAbs, content);
+  if (destAbs !== absolutePath) {
     await rm(absolutePath).catch(() => undefined);
-  } else {
-    await writeAtomic(targetAbs, content);
   }
-  return readReflection(targetRel, input.userDataDir);
+  if (assetsDirRelativeNeedsMove(relativePath, destRel)) {
+    await moveAssetsPair(relativePath, destRel, input.userDataDir);
+  }
+  return readReflection(destRel, input.userDataDir);
+}
+
+function assetsDirRelativeNeedsMove(fromRel: string, toRel: string): boolean {
+  return (
+    path.posix.dirname(fromRel) !== path.posix.dirname(toRel)
+    || reflectionStem(fromRel) !== reflectionStem(toRel)
+  );
 }
 
 export async function deleteReflection(inputPath: string, userDataDir?: string): Promise<void> {
-  const { absolutePath } = resolveReflectionPath(inputPath, userDataDir);
+  const { absolutePath, relativePath } = resolveReflectionPath(inputPath, userDataDir);
   try {
     await rm(absolutePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ReflectionsError("文件不存在或已被删除", 404);
     throw error;
   }
+  await deleteAssetsPair(relativePath, userDataDir);
 }
 
 export type ReflectionTreeNode = {
@@ -384,6 +383,7 @@ async function buildTree(absDir: string, relDir: string, userDataDir?: string): 
     const abs = path.join(absDir, entry.name);
     const rel = normalizeRel(`${relDir}/${entry.name}`);
     if (entry.isDirectory()) {
+      if (isAssetsDirName(entry.name)) continue;
       nodes.push({
         name: entry.name,
         path: rel,
@@ -461,6 +461,7 @@ export async function moveReflection(input: {
   }
   await mkdir(path.dirname(destAbs), { recursive: true });
   await rename(fromAbs, destAbs);
+  await moveAssetsPair(fromRel, destRel, input.userDataDir);
   return readReflection(destRel, input.userDataDir);
 }
 

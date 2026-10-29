@@ -54,33 +54,36 @@ cp scripts/fir.env.example scripts/fir.env
 chmod +x mobile/scripts/发布到fir.command mobile/scripts/publish-fir.sh
 ```
 
-菜单选项：
+菜单选项（若使用 `.command`）：
 
-1. 仅 Android  
-2. 仅 iOS  
+1. 仅 iOS（默认推荐）  
+2. 仅 Android  
 3. Android + iOS 双端  
 4. 只上传已有包（不构建、不递增版本）  
 0. 取消  
 
-双击会打开 Terminal，自动加载 Flutter PATH；选项 1–3 会递增 build 号。
-
 ## 命令行
 
-在 `mobile/` 目录：
+在 `mobile/` 目录。**默认只发 iOS，不发 Android。**
 
 ```bash
-# 两平台都构建并上传（build 自动 +1）
-./scripts/publish-fir.sh --all --changelog "修复连接页"
+# 默认：仅 iOS Adhoc（build 自动 +1）
+./scripts/publish-fir.sh --changelog "更新说明"
 
-# 仅 Android（省 Xcode 编译）
-./scripts/publish-fir.sh --android --changelog "Android 内测"
-
-# 仅 iOS
+# 显式仅 iOS
 ./scripts/publish-fir.sh --ios --changelog "iOS Adhoc"
 
-# 已构建过，只上传
-./scripts/publish-fir.sh --android --skip-build
+# 仅 Android（需显式指定）
+./scripts/publish-fir.sh --android --changelog "Android 内测"
+
+# 两平台
+./scripts/publish-fir.sh --all --changelog "双端"
+
+# 已构建过，只上传 IPA
+./scripts/publish-fir.sh --ios --skip-build --no-bump
 ```
+
+无 `scripts/fir.env` 时会读本机 `~/.fir-cli` 的 token。
 
 依赖：本机已安装 **Flutter**、**curl**；iOS 还需 **Xcode + CocoaPods**。
 

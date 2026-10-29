@@ -11,7 +11,14 @@ import {
   readReflection,
   updateReflection,
 } from "../../reflections/store.js";
+import {
+  listNoteAssets,
+  listOrphanAssets,
+  readReflectionMediaFile,
+  writeReflectionMedia,
+} from "../../reflections/media.js";
 import { parseReflectionPaste } from "../../reflections/parse.js";
+import { readMultipart } from "../form.js";
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson } from "../http-types.js";
 
@@ -123,6 +130,49 @@ export const handleReflectionsRoutes: RouteHandler = async ({ req, res, url }) =
     if (url.pathname === "/api/reflections/organize-by-date" && req.method === "POST") {
       const body = await readJsonBody<{ path?: string }>(req);
       sendJson(res, { reflection: await organizeReflectionByDate(body.path ?? "") });
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/media" && req.method === "POST") {
+      const form = await readMultipart(req);
+      const notePath = form.fields.get("path") ?? "";
+      const kindRaw = (form.fields.get("kind") || "").trim().toLowerCase();
+      const kind = kindRaw === "image" || kindRaw === "audio" ? kindRaw : undefined;
+      const transcript = form.fields.get("transcript") ?? "";
+      const file = form.files.find((item) => item.field === "file") || form.files[0];
+      if (!file) {
+        sendJson(res, { error: "缺少文件" }, 400);
+        return true;
+      }
+      const written = await writeReflectionMedia({
+        path: notePath,
+        data: file.data,
+        filename: file.filename,
+        mime: file.mime,
+        kind,
+        transcript,
+      });
+      sendJson(res, written);
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/media" && req.method === "GET") {
+      const mediaPath = url.searchParams.get("path") ?? "";
+      const file = await readReflectionMediaFile(mediaPath);
+      res.setHeader("Content-Type", file.mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.end(file.data);
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/assets" && req.method === "GET") {
+      const notePath = url.searchParams.get("path") ?? "";
+      sendJson(res, { assets: await listNoteAssets(notePath) });
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/orphans" && req.method === "GET") {
+      sendJson(res, { orphans: await listOrphanAssets() });
       return true;
     }
   } catch (error) {

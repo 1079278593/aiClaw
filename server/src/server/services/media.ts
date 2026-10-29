@@ -22,7 +22,7 @@ export const IMAGE_MIME_BY_EXT: Record<string, string> = {
 const IMAGE_EXTENSIONS = new Set(Object.keys(IMAGE_MIME_BY_EXT));
 const BINARY_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".svg",
-  ".mp4", ".mov", ".avi", ".mkv", ".mp3", ".wav", ".ogg", ".flac",
+  ".mp4", ".mov", ".avi", ".mkv", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".webm",
   ".zip", ".tar", ".gz", ".rar", ".7z", ".exe", ".dll", ".so", ".bin",
   ".pdf", ".woff", ".woff2", ".ttf", ".eot",
 ]);

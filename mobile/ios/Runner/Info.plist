@@ -18,11 +18,11 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接同一局域网中的 aiClaw 服务</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>把说出的话转成原文</string>
+	<string>把说出的话转成文字草稿，用于人物原文与心得语音</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>把说出的话转成原文</string>
+	<string>录制心得语音，并把说出的话转成文字草稿</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于把相册图片发给当前会话</string>
+	<string>用于把相册图片发给当前会话或插入心得</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

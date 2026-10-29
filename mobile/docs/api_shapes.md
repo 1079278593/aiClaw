@@ -212,19 +212,59 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 根目录：`inputs/reflections/`。首页是文件夹。进入文件夹后才列出该层笔记，按 `updatedAt` 在客户端分成今天、昨天、前 7 天、前 30 天，更早按年份（东八区）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。保存更新 `updatedAt`，不改已有 `createdAt`。
 
+### 文内媒体（备忘录式内嵌）
+
+UX：录音/选图插在正文光标处，阅读流里内嵌播放或缩略图。原声必留；转写是可改草稿，失败不挡保存。
+
+存储（Obsidian 式 sidecar，不是苹果不透明库）：
+
+```text
+inputs/reflections/<folder>/
+  散步随想.md
+  散步随想.assets/
+    20261028T032828Z_a1.m4a
+    photo.jpg
+```
+
+- sidecar 名 = `«md 主文件名».assets/`。目录树与列表**隐藏** `*.assets`。
+- 正文只用相对路径，例如 `./散步随想.assets/photo.jpg`，禁止写死仓库绝对路径。
+- `move` / 按日期归夹：同一操作移动 `*.md` + 同名 `*.assets/`（若存在）；相对链接无需改写。
+- 删除篇时一并删除对应 `.assets/`。
+- 用户在 NAS 上手拖时，md 与 `.assets` 应一起拖。
+
+正文标记：
+
+```markdown
+:::aiclaw-audio[id=20261028T032828Z_a1 src="./散步随想.assets/20261028T032828Z_a1.m4a"]
+转写草稿（可手改；以原声为准）
+:::
+
+![说明](./散步随想.assets/photo.jpg)
+```
+
+「拿去问」只带 md 正文（含转写草稿），P0 不把音频送给模型。与人物「可不留音频」策略分离。
+
 | 接口 | 说明 |
 |---|---|
-| `GET /api/reflections?view=tree` | 目录树。文件节点带 `updatedAt`。心得首页用这个，不用扁平时间序 |
+| `GET /api/reflections?view=tree` | 目录树。文件节点带 `updatedAt`。心得首页用这个，不用扁平时间序。不含 `*.assets` |
 | `GET /api/reflections?q=` | 扫树扁平列表，按 `occurredAt` 降序。心得首页不再调用 |
 | `POST /api/reflections` | `{ title, body?, occurredAt?, context?, folder? }`，默认 `folder=inbox` |
 | `GET /api/reflections/content?path=` | 单篇 |
 | `PUT /api/reflections/content` | 按 path 更新标题和正文；省略的发生时刻、情境保持原值。`.txt` 首次保存转为 `.md` |
-| `DELETE /api/reflections?path=` | 删除 |
+| `DELETE /api/reflections?path=` | 删除篇与对应 `.assets/` |
 | `POST /api/reflections/parse` | 只解析记事本粘贴，不写盘 |
 | `POST /api/reflections/import` | `{ text?\|sourcePath?, folder?, dryRun?, deleteSource? }` 拆篇写入 |
 | `POST /api/reflections/mkdir` | `{ folder }` |
-| `POST /api/reflections/move` | `{ from, toFolder?\|toPath? }` |
-| `POST /api/reflections/organize-by-date` | `{ path }` → 移到 `YYYY/MM/` |
+| `POST /api/reflections/move` | `{ from, toFolder?\|toPath? }`；成对迁移 sidecar |
+| `POST /api/reflections/organize-by-date` | `{ path }` → 移到 `YYYY/MM/`；成对迁移 sidecar |
+| `POST /api/reflections/media` | `multipart/form-data`：`path`（篇 md）、`file`、可选 `kind=audio\|image`、`transcript`。写入 sidecar，返回 `{ id, relativeSrc, mediaPath, marker, kind }` |
+| `GET /api/reflections/media?path=` | 读取 sidecar 内文件（须在某个 `*.assets/` 下）。需 Bearer（鉴权开启时） |
+| `GET /api/reflections/assets?path=` | 本篇 sidecar 文件列表 `{ assets: [{ name, path, kind }] }`，`kind` 为 `audio` / `image` / `other` |
+| `GET /api/reflections/orphans` | 无对应 md/txt 的 `*.assets` 目录 `{ orphans: [{ path, stem, folder }] }` |
+
+标题变更且净化后的文件名与当前主名不同时，`PUT /api/reflections/content` 会重命名 `.md`、成对重命名 `.assets`，并改写正文里的 `./旧名.assets/` 前缀。
+
+语音：App 手动开始/结束（备忘录式，不因时长或静音自动停录）。Web 浏览器录音保留约 5 分钟安全上限自动结束，避免标签页长时间占麦。静音自动停更适合「听写会话」，不适合「原声附件」（停顿思考会被误切）。「改转写草稿」只改标记内文字；系统 Speech 不能对已存原声自动重转，云端精转属后续。
 
 拿去问：打开该篇后发 `chatMessage` 带 `previewPath`（路径如 `inputs/reflections/inbox/xxx.md`），不设 `threadPath`。
 

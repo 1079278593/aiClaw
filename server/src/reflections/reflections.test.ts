@@ -1,8 +1,16 @@
-import { mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BRAND_SLUG } from "../brand.js";
+import {
+  assetsDirRelative,
+  formatAudioMarker,
+  listOrphanAssets,
+  relativeMediaSrc,
+  rewriteAssetsPrefixInBody,
+  writeReflectionMedia,
+} from "./media.js";
 import { parseOccurredLine, parseReflectionPaste } from "./parse.js";
 import {
   createReflection,
@@ -160,10 +168,11 @@ describe("reflections store", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     const updated = await updateReflection({
       path: created.path,
-      title: "甲改",
+      title: "甲",
       body: "新正文",
       userDataDir: dir,
     });
+    expect(updated.path).toBe(created.path);
     expect(updated.createdAt).toBe(created.createdAt);
     expect(updated.updatedAt! > created.updatedAt!).toBe(true);
 
@@ -174,4 +183,95 @@ describe("reflections store", () => {
     expect(doc.createdAt).toBe(created.createdAt);
     expect(doc.updatedAt).toBe(updated.updatedAt);
   });
+
+  it("renames md and assets when title changes, and detects orphan assets", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "旧名",
+      body: "正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    const written = await writeReflectionMedia({
+      path: created.path,
+      data: Buffer.from("x"),
+      filename: "a.m4a",
+      kind: "audio",
+      userDataDir: dir,
+    });
+    const withBody = await updateReflection({
+      path: created.path,
+      body: `见\n\n${written.marker}`,
+      userDataDir: dir,
+    });
+    const renamed = await updateReflection({
+      path: withBody.path,
+      title: "新名",
+      userDataDir: dir,
+    });
+    expect(renamed.path).toBe("inputs/reflections/inbox/新名.md");
+    expect(renamed.body).toContain("./新名.assets/");
+    await access(path.join(dir, "inputs", "reflections", "inbox", "新名.assets", path.basename(written.mediaPath)));
+
+    await mkdir(path.join(dir, "inputs", "reflections", "inbox", "孤儿.assets"), { recursive: true });
+    await writeFile(path.join(dir, "inputs", "reflections", "inbox", "孤儿.assets", "x.jpg"), "y");
+    const orphans = await listOrphanAssets(dir);
+    expect(orphans.some((item) => item.path.endsWith("孤儿.assets"))).toBe(true);
+    expect(orphans.some((item) => item.path.endsWith("新名.assets"))).toBe(false);
+  });
+
+  it("writes sidecar media, moves and deletes with the note", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "散步随想",
+      body: "前一段",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    expect(assetsDirRelative(created.path)).toBe("inputs/reflections/inbox/散步随想.assets");
+    expect(relativeMediaSrc(created.path, "a.m4a")).toBe("./散步随想.assets/a.m4a");
+
+    const written = await writeReflectionMedia({
+      path: created.path,
+      data: Buffer.from("fake-audio"),
+      filename: "clip.m4a",
+      mime: "audio/mp4",
+      kind: "audio",
+      transcript: "草稿字",
+      userDataDir: dir,
+    });
+    expect(written.relativeSrc.startsWith("./散步随想.assets/")).toBe(true);
+    expect(written.marker).toContain(":::aiclaw-audio");
+    expect(written.marker).toContain("草稿字");
+    await access(path.join(dir, written.mediaPath));
+
+    const withMarker = await updateReflection({
+      path: created.path,
+      body: `前一段\n\n${written.marker}\n\n后一段`,
+      userDataDir: dir,
+    });
+    const moved = await moveReflection({ from: withMarker.path, toFolder: "主题A", userDataDir: dir });
+    expect(moved.path).toBe("inputs/reflections/主题A/散步随想.md");
+    await access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.assets", path.basename(written.mediaPath)));
+    await expect(access(path.join(dir, "inputs", "reflections", "inbox", "散步随想.assets"))).rejects.toBeTruthy();
+
+    const tree = await listReflectionTree(dir);
+    const theme = tree.find((node) => node.name === "主题A");
+    expect(theme?.children?.some((node) => isAssetsDirNameLike(node.name))).toBeFalsy();
+
+    await deleteReflection(moved.path, dir);
+    await expect(access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.md"))).rejects.toBeTruthy();
+    await expect(access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.assets"))).rejects.toBeTruthy();
+  });
+
+  it("formats audio marker and rewrites assets prefix", () => {
+    expect(formatAudioMarker("id1", "./a.assets/x.m4a", "字")).toBe(
+      ':::aiclaw-audio[id=id1 src="./a.assets/x.m4a"]\n字\n:::',
+    );
+    expect(rewriteAssetsPrefixInBody("见 ./旧.assets/a.jpg", "旧", "新")).toBe("见 ./新.assets/a.jpg");
+  });
 });
+
+function isAssetsDirNameLike(name: string): boolean {
+  return name.endsWith(".assets");
+}

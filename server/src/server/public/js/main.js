@@ -48,6 +48,7 @@ Object.assign(actions, view, chat, sessions, {
   peopleRemount: () => people.remount(),
   reflectionsRemount: () => reflections.remount(),
   canLeaveReflections: () => reflections.canLeave(),
+  prepareLeaveReflections: () => reflections.prepareLeave(),
 });
 
 function setConnectionStatus(connected) {

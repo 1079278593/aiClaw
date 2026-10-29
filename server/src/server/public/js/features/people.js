@@ -275,9 +275,18 @@ export function createPeopleFeature({ state, actions }) {
   }
 
   function setWorkspace(next) {
-    if (state.workspace === "reflections" && next !== "reflections" && actions.canLeaveReflections && !actions.canLeaveReflections()) {
-      return;
-    }
+    void (async () => {
+      if (state.workspace === "reflections" && next !== "reflections") {
+        const ok = actions.prepareLeaveReflections
+          ? await actions.prepareLeaveReflections()
+          : !actions.canLeaveReflections || actions.canLeaveReflections();
+        if (!ok) return;
+      }
+      applyWorkspace(next);
+    })();
+  }
+
+  function applyWorkspace(next) {
     state.workspace = next;
     document.body.classList.toggle("people-workspace", next === "people");
     document.body.classList.toggle("reflections-workspace", next === "reflections");

@@ -57,6 +57,7 @@ class ApiClient {
     required String token,
     required Map<String, String> fields,
     required List<({String filename, Uint8List bytes, String mime})> files,
+    String fileField = 'images',
   }) async {
     final boundary = 'aiclaw-${DateTime.now().microsecondsSinceEpoch}';
     final builder = BytesBuilder();
@@ -68,7 +69,7 @@ class ApiClient {
     }
     for (final file in files) {
       add('--$boundary\r\n');
-      add('Content-Disposition: form-data; name="images"; filename="${file.filename}"\r\n');
+      add('Content-Disposition: form-data; name="$fileField"; filename="${file.filename}"\r\n');
       add('Content-Type: ${file.mime}\r\n\r\n');
       builder.add(file.bytes);
       add('\r\n');
