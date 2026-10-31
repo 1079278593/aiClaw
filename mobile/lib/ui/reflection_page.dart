@@ -15,6 +15,7 @@ import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import '../src/reflection_body.dart';
 import 'chat_page.dart';
+import 'image_crop_page.dart';
 
 class ReflectionPage extends StatefulWidget {
   const ReflectionPage({
@@ -60,6 +61,8 @@ class _ReflectionPageState extends State<ReflectionPage> {
   int _pieceKey = 0;
   final Map<String, String> _localAudio = {};
   final Map<String, Duration> _audioDuration = {};
+  final Map<String, Uint8List> _imageBytes = {};
+  final Set<String> _imageLoading = {};
   static const _autosaveDelay = Duration(milliseconds: 1000);
   static final _audioBlockRe = RegExp(
     r'^:::aiclaw-audio\[([^\]]*)\]\r?\n([\s\S]*?)^:::[ \t]*$',
@@ -279,6 +282,9 @@ class _ReflectionPageState extends State<ReflectionPage> {
     for (final piece in next.where((piece) => piece.kind == 'audio')) {
       unawaited(_ensureDuration(piece));
     }
+    for (final piece in next.where((piece) => piece.kind == 'image')) {
+      unawaited(_ensureImageBytes(piece));
+    }
     if (retired.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final controller in retired) {
@@ -320,22 +326,41 @@ class _ReflectionPageState extends State<ReflectionPage> {
   }
 
   Future<void> _pickImage() async {
-    final file = await _picker.pickImage(source: ImageSource.gallery);
-    if (file == null) return;
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2048,
+      maxHeight: 2048,
+      imageQuality: 88,
+    );
+    if (picked == null) return;
+    final raw = await picked.readAsBytes();
+    if (raw.length > 20 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('图片太大（超过 20MB）')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final cropped = await Navigator.of(context).push<CroppedImage>(
+      MaterialPageRoute<CroppedImage>(
+        builder: (_) => ImageCropPage(bytes: raw, mime: 'image/jpeg'),
+      ),
+    );
+    if (cropped == null || !mounted) return;
     final notePath = await _ensurePath();
     if (notePath == null) return;
     setState(() => _uploadingMedia = true);
     try {
-      final bytes = await file.readAsBytes();
       final payload = await widget.controller.api.postMultipart(
         apiUri(widget.controller.baseUrl, '/api/reflections/media'),
         token: widget.controller.token,
         fields: {'path': notePath, 'kind': 'image'},
         files: [
           (
-            filename: file.name.isEmpty ? 'image.jpg' : file.name,
-            bytes: bytes,
-            mime: 'image/jpeg',
+            filename: cropped.mime == 'image/png' ? 'image.png' : 'image.jpg',
+            bytes: cropped.bytes,
+            mime: cropped.mime,
           ),
         ],
         fileField: 'file',
@@ -489,6 +514,28 @@ class _ReflectionPageState extends State<ReflectionPage> {
       }
       if (mounted) setState(() {});
     } catch (_) {}
+  }
+
+  /// 图片只按 src 取一次，之后重绘直接用内存里的字节，避免每次 setState 重下载。
+  Future<void> _ensureImageBytes(ReflectionPiece item) async {
+    if (_imageBytes.containsKey(item.src) || _imageLoading.contains(item.src)) return;
+    final mediaPath = _resolveMediaPath(item.src);
+    if (mediaPath.isEmpty) return;
+    _imageLoading.add(item.src);
+    try {
+      final bytes = await widget.controller.api.getBytes(
+        apiUri(widget.controller.baseUrl, '/api/reflections/media', {
+          'path': mediaPath,
+        }),
+        token: widget.controller.token,
+      );
+      if (!mounted) return;
+      setState(() => _imageBytes[item.src] = bytes);
+    } catch (_) {
+      // 下次重建还能再试
+    } finally {
+      _imageLoading.remove(item.src);
+    }
   }
 
   Future<void> _loadSource(ReflectionPiece item, String path) async {
@@ -810,30 +857,123 @@ class _ReflectionPageState extends State<ReflectionPage> {
 
   Widget _imageBlock(ReflectionPiece item) {
     final mediaPath = _resolveMediaPath(item.src);
+    final bytes = _imageBytes[item.src];
+    if (mediaPath.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(item.alt.isEmpty ? '图片' : item.alt),
+      );
+    }
+    if (bytes == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(
+          height: 120,
+          child: Center(
+            child: _imageLoading.contains(item.src)
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('图片无法加载'),
+          ),
+        ),
+      );
+    }
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final targetWidth =
+        (MediaQuery.sizeOf(context).width * dpr).round().clamp(320, 2048);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: mediaPath.isEmpty
-          ? Text(item.alt.isEmpty ? '图片' : item.alt)
-          : FutureBuilder<Uint8List>(
-              future: widget.controller.api.getBytes(
-                apiUri(widget.controller.baseUrl, '/api/reflections/media', {'path': mediaPath}),
-                token: widget.controller.token,
-              ),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) return const Text('图片无法加载');
-                if (!snapshot.hasData) {
-                  return const SizedBox(
-                    height: 80,
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(snapshot.data!, fit: BoxFit.contain),
-                );
-              },
-            ),
+      child: GestureDetector(
+        onLongPress: () => unawaited(_showImageMenu(item)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            cacheWidth: targetWidth,
+            gaplessPlayback: true,
+          ),
+        ),
+      ),
     );
+  }
+
+  Future<void> _showImageMenu(ReflectionPiece item) async {
+    final scheme = Theme.of(context).colorScheme;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('删除图片', style: TextStyle(color: scheme.error)),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action != 'delete' || !mounted) return;
+    await _deleteImage(item);
+  }
+
+  Future<void> _deleteImage(ReflectionPiece item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除图片'),
+        content: const Text('图片会从正文里去掉，文件一起删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final body = _body.text;
+    final target = item.raw;
+    final index = body.indexOf(target);
+    if (index == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('找不到对应图片')),
+      );
+      return;
+    }
+    _body.removeListener(_onEdited);
+    _body.value = TextEditingValue(
+      text: body.replaceRange(index, index + target.length, ''),
+    );
+    _body.addListener(_onEdited);
+    _imageBytes.remove(item.src);
+    _reloadPieces();
+    _onEdited();
+    await _flush();
+    final mediaPath = _resolveMediaPath(item.src);
+    if (mediaPath.isEmpty) return;
+    try {
+      await widget.controller.api.sendJson(
+        'DELETE',
+        apiUri(widget.controller.baseUrl, '/api/reflections/media', {
+          'path': mediaPath,
+        }),
+        token: widget.controller.token,
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 
   /// 改一条语音标记的转写或名称；标记原文变了，界面片段一起重画。

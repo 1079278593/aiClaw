@@ -1,6 +1,7 @@
 import { access, mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { BRAND_SLUG } from "../brand.js";
 import {
@@ -297,8 +298,125 @@ describe("reflections store", () => {
     await expect(access(path.join(dir, written.mediaPath))).rejects.toBeTruthy();
   });
 
-  it("renames and deletes folders with their notes inside", async () => {
+  it("crops, downsizes and compresses images on the way in", async () => {
     const dir = await setup();
+    const created = await createReflection({
+      title: "带图",
+      body: "正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    const side = 2400;
+    const noise = Buffer.alloc(side * side * 3);
+    for (let i = 0; i < noise.length; i += 1) noise[i] = (i * 37 + (i >> 3) * 11) % 256;
+    const raw = await sharp(noise, { raw: { width: side, height: side, channels: 3 } }).jpeg({ quality: 100 }).toBuffer();
+
+    const written = await writeReflectionMedia({
+      path: created.path,
+      data: raw,
+      filename: "screenshot.png",
+      kind: "image",
+      crop: { left: 0.25, top: 0.25, width: 0.5, height: 0.5 },
+      userDataDir: dir,
+    });
+
+    expect(written.kind).toBe("image");
+    expect(written.relativeSrc.endsWith(".jpg")).toBe(true);
+    expect(written.bytes).toBeLessThanOrEqual(900 * 1024);
+    expect(written.width).toBe(1200);
+    expect(written.height).toBe(1200);
+    const meta = await sharp(path.join(dir, written.mediaPath)).metadata();
+    expect(meta.width).toBe(1200);
+    expect(meta.height).toBe(1200);
+
+    // 图片标记只是相对路径，不带尺寸参数
+    expect(written.marker).toBe(`![](${written.relativeSrc})`);
+  });
+
+  it("keeps transparency by encoding as webp", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "透明图",
+      body: "正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    const png = await sharp({
+      create: { width: 400, height: 300, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.5 } },
+    }).png().toBuffer();
+    const written = await writeReflectionMedia({
+      path: created.path,
+      data: png,
+      filename: "logo.png",
+      kind: "image",
+      userDataDir: dir,
+    });
+    expect(written.relativeSrc.endsWith(".webp")).toBe(true);
+    const meta = await sharp(path.join(dir, written.mediaPath)).metadata();
+    expect(meta.hasAlpha).toBe(true);
+    expect(meta.width).toBe(400);
+  });
+
+  it("rejects images that are not images", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "假图",
+      body: "正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    await expect(writeReflectionMedia({
+      path: created.path,
+      data: Buffer.from("not an image at all"),
+      filename: "x.png",
+      kind: "image",
+      userDataDir: dir,
+    })).rejects.toThrow(/无法识别的图片/);
+  });
+
+  it("gives tree nodes an excerpt and a recursive note count", async () => {
+    const dir = await setup();
+    await createReflection({
+      title: "长文",
+      body: [
+        "第一行正文。",
+        "",
+        ":::aiclaw-audio[id=a1 src=\"./x.assets/a.m4a\"]",
+        "这段转写不该出现在摘要里",
+        ":::",
+        "",
+        "![](./x.assets/p.jpg)",
+        "",
+        "## 小结",
+        "**加粗**的收尾。",
+      ].join("\n"),
+      folder: "主题B/子夹",
+      userDataDir: dir,
+    });
+    await createReflection({
+      title: "短记",
+      body: "只有一句话",
+      folder: "主题B",
+      userDataDir: dir,
+    });
+
+    const tree = await listReflectionTree(dir);
+    const themeFolder = tree.find((node) => node.name === "主题B");
+    expect(themeFolder?.noteCount).toBe(2);
+
+    const subFolder = themeFolder?.children?.find((node) => node.name === "子夹");
+    expect(subFolder?.noteCount).toBe(1);
+
+    const note = subFolder?.children?.find((node) => node.kind === "file");
+    expect(note?.excerpt).toBe("第一行正文。 小结 加粗的收尾。");
+    expect(note?.excerpt).not.toContain(":::aiclaw-audio");
+    expect(note?.excerpt).not.toContain("转写");
+
+    const shortNote = themeFolder?.children?.find((node) => node.kind === "file");
+    expect(shortNote?.excerpt).toBe("只有一句话");
+  });
+
+  it("renames and deletes folders with their notes inside", async () => {    const dir = await setup();
     await mkdirReflection("主题A", dir);
     const created = await createReflection({
       title: "散步",

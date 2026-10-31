@@ -154,6 +154,29 @@ async function readMetaFromFile(absolutePath: string, relativePath: string): Pro
   };
 }
 
+const EXCERPT_MAX = 80;
+
+/**
+ * 列表第二行的正文摘要：去掉 front matter 之外的结构标记，压成一行。
+ * 语音卡整块跳过（:::aiclaw-audio[...] 包起来的转写不是正文），图片只留 alt。
+ */
+export function buildReflectionExcerpt(raw: string, max = EXCERPT_MAX): string {
+  const { body } = parseFrontMatter(raw);
+  const cleaned = body
+    .replace(/:::aiclaw-audio\[[^\]]*\][\s\S]*?:::/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/`{1,3}([^`]*)`{1,3}/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_~]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max).trimEnd()}…`;
+}
+
 function fileCreatedAt(st: { birthtime: Date; mtime: Date }): string {
   const birth = st.birthtime?.getTime?.() ?? 0;
   if (Number.isFinite(birth) && birth > 0) return st.birthtime.toISOString();
@@ -372,12 +395,24 @@ export type ReflectionTreeNode = {
   path: string;
   kind: "directory" | "file";
   title?: string;
+  excerpt?: string;
+  noteCount?: number;
   occurredAt?: string;
   updatedAt?: string;
   createdAt?: string;
   context?: string;
   children?: ReflectionTreeNode[];
 };
+
+/** 文件夹徽标上的数字：本篇与所有子文件夹里的笔记总数。 */
+function countNotesIn(nodes: ReflectionTreeNode[]): number {
+  let total = 0;
+  for (const node of nodes) {
+    if (node.kind === "file") total += 1;
+    else if (node.children) total += countNotesIn(node.children);
+  }
+  return total;
+}
 
 async function buildTree(absDir: string, relDir: string, userDataDir?: string): Promise<ReflectionTreeNode[]> {
   let entries;
@@ -393,22 +428,26 @@ async function buildTree(absDir: string, relDir: string, userDataDir?: string): 
     const rel = normalizeRel(`${relDir}/${entry.name}`);
     if (entry.isDirectory()) {
       if (isAssetsDirName(entry.name)) continue;
+      const children = await buildTree(abs, rel, userDataDir);
       nodes.push({
         name: entry.name,
         path: rel,
         kind: "directory",
-        children: await buildTree(abs, rel, userDataDir),
+        noteCount: countNotesIn(children),
+        children,
       });
       continue;
     }
     if (!entry.isFile() || !TEXT_EXT.has(path.extname(entry.name).toLowerCase())) continue;
     try {
       const meta = await readMetaFromFile(abs, rel);
+      const raw = await readFile(abs, "utf-8");
       nodes.push({
         name: entry.name,
         path: rel,
         kind: "file",
         title: meta.title,
+        excerpt: buildReflectionExcerpt(raw),
         occurredAt: meta.occurredAt,
         updatedAt: meta.updatedAt,
         createdAt: meta.createdAt,

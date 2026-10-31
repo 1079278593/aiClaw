@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import {
   ReflectionsError,
   ROOT_REL,
@@ -34,6 +35,13 @@ const IMAGE_MIME: Record<string, string> = {
 };
 
 const MAX_BYTES = 25 * 1024 * 1024;
+/** 落盘目标：手机端看图、上传都够用，又不会把 NAS 撑爆。 */
+const IMAGE_TARGET_BYTES = 900 * 1024;
+const IMAGE_MAX_DIMENSION = 2048;
+const IMAGE_QUALITY_START = 84;
+const IMAGE_QUALITY_FLOOR = 58;
+
+export type CropRect = { left: number; top: number; width: number; height: number };
 
 export function isAssetsDirName(name: string): boolean {
   return name.endsWith(ASSETS_SUFFIX);
@@ -97,6 +105,103 @@ function pickExt(input: { filename?: string; mime?: string; kind?: "audio" | "im
   return ".m4a";
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+/** 把 0..1 的比例裁剪框换算成像素，并保证不越界、最小 16px。 */
+export function cropToPixels(
+  crop: CropRect | undefined,
+  width: number,
+  height: number,
+): { left: number; top: number; width: number; height: number } | null {
+  if (!crop) return null;
+  const left = Math.round(clamp01(crop.left) * width);
+  const top = Math.round(clamp01(crop.top) * height);
+  const w = Math.round(clamp01(crop.width) * width);
+  const h = Math.round(clamp01(crop.height) * height);
+  const safeW = Math.max(16, Math.min(w, width - left));
+  const safeH = Math.max(16, Math.min(h, height - top));
+  if (safeW < 16 || safeH < 16) return null;
+  return { left, top, width: safeW, height: safeH };
+}
+
+/**
+ * 图片落盘前统一处理：按 EXIF 转正、可选裁剪、限长边、整块重编码。
+ * 目标是「看不出损失但文件小」：渐进式 JPEG（带透明则 WebP），质量从 84 往下降，
+ * 直到小于 IMAGE_TARGET_BYTES；仍超就继续等比缩边。
+ */
+export async function processReflectionImage(
+  data: Buffer,
+  crop?: CropRect,
+): Promise<{ data: Buffer; ext: string; mime: string; width: number; height: number }> {
+  let pipeline = sharp(data, { failOn: "none", limitInputPixels: 60_000_000 }).rotate();
+  let meta;
+  try {
+    meta = await pipeline.metadata();
+  } catch {
+    throw new ReflectionsError("无法识别的图片（仅支持 JPG、PNG、WebP、GIF）", 400);
+  }
+  if (!meta.width || !meta.height) {
+    throw new ReflectionsError("无法识别的图片（仅支持 JPG、PNG、WebP、GIF）", 400);
+  }
+  const box = cropToPixels(crop, meta.width, meta.height);
+  if (box) pipeline = pipeline.extract(box);
+
+  const hasAlpha = Boolean(meta.hasAlpha);
+  // 动图保留原文件（重编码会丢帧），只做体积上限判断。
+  if (meta.format === "gif" && (meta.pages || 1) > 1 && !box && data.length <= 4 * 1024 * 1024) {
+    return { data, ext: ".gif", mime: "image/gif", width: meta.width, height: meta.height };
+  }
+  const targetFormat = hasAlpha ? "webp" : "jpeg";
+
+  let maxEdge = IMAGE_MAX_DIMENSION;
+  for (let shrink = 0; shrink < 4; shrink += 1) {
+    for (let quality = IMAGE_QUALITY_START; quality >= IMAGE_QUALITY_FLOOR; quality -= 8) {
+      const encoded = await encodeImage(pipeline, targetFormat, quality, maxEdge);
+      if (encoded.data.length <= IMAGE_TARGET_BYTES) {
+        return {
+          data: encoded.data,
+          ext: targetFormat === "jpeg" ? ".jpg" : ".webp",
+          mime: targetFormat === "jpeg" ? "image/jpeg" : "image/webp",
+          width: encoded.info.width,
+          height: encoded.info.height,
+        };
+      }
+    }
+    maxEdge = Math.round(maxEdge * 0.75);
+  }
+  // 极端情况（超大长图）：最后一次也收下，保证能存进去。
+  const fallback = await encodeImage(pipeline, targetFormat, 55, maxEdge);
+  return {
+    data: fallback.data,
+    ext: targetFormat === "jpeg" ? ".jpg" : ".webp",
+    mime: targetFormat === "jpeg" ? "image/jpeg" : "image/webp",
+    width: fallback.info.width,
+    height: fallback.info.height,
+  };
+}
+
+async function encodeImage(
+  pipeline: ReturnType<typeof sharp>,
+  format: "jpeg" | "webp",
+  quality: number,
+  maxEdge: number,
+): Promise<{ data: Buffer; info: { width: number; height: number } }> {
+  try {
+    return await pipeline
+      .clone()
+      .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
+      .toFormat(format, format === "jpeg"
+        ? { quality, mozjpeg: true, progressive: true }
+        : { quality, effort: 4 })
+      .toBuffer({ resolveWithObject: true });
+  } catch {
+    throw new ReflectionsError("图片处理失败", 400);
+  }
+}
+
 export async function ensureAssetsDir(mdPath: string, userDataDir?: string): Promise<{
   relativeDir: string;
   absoluteDir: string;
@@ -123,6 +228,7 @@ export async function writeReflectionMedia(input: {
   mime?: string;
   kind?: "audio" | "image";
   transcript?: string;
+  crop?: CropRect;
   userDataDir?: string;
 }): Promise<{
   id: string;
@@ -130,6 +236,9 @@ export async function writeReflectionMedia(input: {
   mediaPath: string;
   marker: string;
   kind: "audio" | "image";
+  bytes: number;
+  width?: number;
+  height?: number;
 }> {
   if (!input.data?.length) throw new ReflectionsError("缺少文件", 400);
   if (input.data.length > MAX_BYTES) throw new ReflectionsError("文件过大", 400);
@@ -137,24 +246,43 @@ export async function writeReflectionMedia(input: {
   const { absoluteDir } = await ensureAssetsDir(relativePath, input.userDataDir);
   const id = newMediaId();
   const kind = input.kind || (IMAGE_MIME[pickExt(input)] ? "image" : "audio");
-  const ext = pickExt({ ...input, kind });
+  let payload = input.data;
+  let ext = pickExt({ ...input, kind });
+  let width: number | undefined;
+  let height: number | undefined;
+  if (kind === "image") {
+    const processed = await processReflectionImage(input.data, input.crop);
+    payload = processed.data;
+    ext = processed.ext;
+    width = processed.width;
+    height = processed.height;
+  }
   const filename = `${id}${ext}`;
   const absoluteFile = path.join(absoluteDir, filename);
   const tmp = `${absoluteFile}.${process.pid}.tmp`;
-  await writeFile(tmp, input.data);
+  await writeFile(tmp, payload);
   await rename(tmp, absoluteFile);
   const relativeSrc = relativeMediaSrc(relativePath, filename);
   const mediaPath = resolveMediaRelFromNote(relativePath, relativeSrc);
   const marker = kind === "image"
     ? formatImageMarkdown(relativeSrc)
     : formatAudioMarker(id, relativeSrc, input.transcript || "");
-  return { id, relativeSrc, mediaPath, marker, kind };
+  return {
+    id,
+    relativeSrc,
+    mediaPath,
+    marker,
+    kind,
+    bytes: payload.length,
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+  };
 }
 
 export async function readReflectionMediaFile(
   mediaRelPath: string,
   userDataDir?: string,
-): Promise<{ absolutePath: string; mime: string; data: Buffer }> {
+): Promise<{ absolutePath: string; mime: string; data: Buffer; etag: string; mtimeMs: number }> {
   const { absolutePath, relativePath } = resolveReflectionPath(mediaRelPath, userDataDir);
   // 只允许读 *.assets/ 下的文件
   const parts = relativePath.split("/");
@@ -163,8 +291,14 @@ export async function readReflectionMediaFile(
     throw new ReflectionsError("不是心得附件路径", 400);
   }
   try {
-    const data = await readFile(absolutePath);
-    return { absolutePath, mime: mimeFromExt(path.extname(absolutePath)), data };
+    const [data, info] = await Promise.all([readFile(absolutePath), stat(absolutePath)]);
+    return {
+      absolutePath,
+      mime: mimeFromExt(path.extname(absolutePath)),
+      data,
+      etag: `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`,
+      mtimeMs: info.mtimeMs,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new ReflectionsError("文件不存在或已被删除", 404);

@@ -214,7 +214,7 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 ### 文内媒体（备忘录式内嵌）
 
-UX：录音和图片插在正文里。界面不展示 `:::aiclaw-audio` 原文。语音是占满一行的圆角卡片：标题行左侧是标题「录音」（改名后显示新名字）、记录时间、时长，右侧是播放按钮；点播放后变成倒退 15 秒、播放/暂停、前进 15 秒。分割线下面是「听写文本」和最多两行转写。长按卡片出「重命名 / 编辑听写文本 / 删除」；网页端还支持右键和退格删除（光标紧挨卡片时）。原声必留；转写是可改草稿，失败不挡保存。
+UX：录音和图片插在正文里。界面不展示 `:::aiclaw-audio` 原文。语音是占满一行的圆角卡片：标题行左侧是标题「录音」（改名后显示新名字）、记录时间、时长，右侧是播放按钮；点播放后变成倒退 15 秒、播放/暂停、前进 15 秒。分割线下面是「听写文本」和最多两行转写。长按卡片出「重命名 / 编辑听写文本 / 删除」；网页端还支持右键和退格删除（光标紧挨卡片时）。图片是可点按的整块，长按只出「删除」；网页端同样支持右键与退格。原声必留；转写是可改草稿，失败不挡保存。
 
 存储（Obsidian 式 sidecar，不是苹果不透明库）：
 
@@ -232,6 +232,14 @@ inputs/reflections/<folder>/
 - 删除篇时一并删除对应 `.assets/`。
 - 用户在 NAS 上手拖时，md 与 `.assets` 应一起拖。
 
+图片上传：客户端先裁剪（网页 canvas、App 全屏裁剪框），再交给服务端统一处理：
+
+- 上限 20 MiB，超过直接拒绝。
+- 按 EXIF 转正 → 可选裁剪 → 长边限 2048 → 重编码（带透明走 WebP，其余渐进式 JPEG）。
+- 质量从 84 往下降到 58，直到 ≤ 900 KiB；仍超就继续等比缩边。视觉上几乎无损，文件从几 MB 降到几百 KB。
+- 动图 GIF 在 4 MiB 内原样保留（重编码会丢帧）。
+- 媒体 GET 带 `ETag` / `Last-Modified` / `Cache-Control: private, max-age=31536000, immutable`（sidecar 文件名是唯一 id，内容不原地改），客户端按路径缓存，切笔记才清。
+
 正文标记：
 
 ```markdown
@@ -248,7 +256,7 @@ inputs/reflections/<folder>/
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/reflections?view=tree` | 目录树。文件节点带 `updatedAt`。心得首页用这个，不用扁平时间序。不含 `*.assets` |
+| `GET /api/reflections?view=tree` | 目录树。文件节点带 `title` / `excerpt`（正文首段压成一行，已剔除语音块和图片标记）/ `updatedAt`；目录节点带 `noteCount`（含子文件夹的笔记总数）。心得首页用这个，不用扁平时间序。不含 `*.assets` |
 | `GET /api/reflections?q=` | 扫树扁平列表，按 `occurredAt` 降序。心得首页不再调用 |
 | `POST /api/reflections` | `{ title, body?, occurredAt?, context?, folder? }`，默认 `folder=inbox` |
 | `GET /api/reflections/content?path=` | 单篇 |
@@ -261,8 +269,8 @@ inputs/reflections/<folder>/
 | `DELETE /api/reflections/folder?path=` | 删除文件夹及其中全部笔记与附件 |
 | `POST /api/reflections/move` | `{ from, toFolder?\|toPath? }`；成对迁移 sidecar |
 | `POST /api/reflections/organize-by-date` | `{ path }` → 移到 `YYYY/MM/`；成对迁移 sidecar |
-| `POST /api/reflections/media` | `multipart/form-data`：`path`（篇 md）、`file`、可选 `kind=audio\|image`、`transcript`。写入 sidecar，返回 `{ id, relativeSrc, mediaPath, marker, kind }` |
-| `GET /api/reflections/media?path=` | 读取 sidecar 内文件（须在某个 `*.assets/` 下）。需 Bearer（鉴权开启时） |
+| `POST /api/reflections/media` | `multipart/form-data`：`path`（篇 md）、`file`、可选 `kind=audio\|image`、`transcript`、`crop=left,top,width,height`（0..1 比例，仅图片）。图片会裁剪/限边/重编码后落盘，返回 `{ id, relativeSrc, mediaPath, marker, kind, bytes, width?, height? }` |
+| `GET /api/reflections/media?path=` | 读取 sidecar 内文件（须在某个 `*.assets/` 下）。需 Bearer（鉴权开启时）。带 `ETag`，支持 `If-None-Match` 304 |
 | `DELETE /api/reflections/media?path=` | 删除单个 sidecar 文件。正文仍引用同一文件名时返回 409，先删正文里的标记 |
 | `GET /api/reflections/assets?path=` | 本篇 sidecar 文件列表 `{ assets: [{ name, path, kind }] }`，`kind` 为 `audio` / `image` / `other` |
 | `GET /api/reflections/orphans` | 无对应 md/txt 的 `*.assets` 目录 `{ orphans: [{ path, stem, folder }] }` |

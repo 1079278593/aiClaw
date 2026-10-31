@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import '../src/reflection_groups.dart';
+import 'reflection_list_rows.dart';
 import 'reflection_page.dart';
 
 class _Node {
@@ -12,7 +13,10 @@ class _Node {
       path = '${json['path'] ?? ''}',
       kind = '${json['kind'] ?? ''}',
       title = '${json['title'] ?? ''}',
+      excerpt = '${json['excerpt'] ?? ''}',
+      occurredAt = '${json['occurredAt'] ?? ''}',
       updatedAt = '${json['updatedAt'] ?? ''}',
+      noteCount = json['noteCount'] is num ? (json['noteCount'] as num).toInt() : 0,
       children = [
         for (final item
             in json['children'] is List ? json['children'] as List : const [])
@@ -23,7 +27,10 @@ class _Node {
   final String path;
   final String kind;
   final String title;
+  final String excerpt;
+  final String occurredAt;
   final String updatedAt;
+  final int noteCount;
   final List<_Node> children;
 
   List<_Node> get folders {
@@ -36,6 +43,16 @@ class _Node {
     final items = children.where((node) => node.kind == 'file').toList();
     items.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return items;
+  }
+
+  /// 徽标数字：本篇与所有子文件夹的笔记总数。
+  int get totalNotes {
+    if (noteCount > 0) return noteCount;
+    var total = 0;
+    for (final node in children) {
+      total += node.kind == 'file' ? 1 : node.totalNotes;
+    }
+    return total;
   }
 }
 
@@ -288,24 +305,21 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
     final open = _expanded.contains(folder.path);
     return Column(
       children: [
-        ListTile(
-          contentPadding: EdgeInsets.only(left: 16 + depth * 16, right: 8),
-          leading: const Icon(Icons.folder_outlined),
-          title: Text(folder.name),
+        ReflectionFolderRow(
+          name: folder.name,
+          noteCount: folder.totalNotes,
+          depth: depth,
+          expandable: nested.isNotEmpty,
+          expanded: open,
+          onToggleExpand: () => setState(() {
+            if (open) {
+              _expanded.remove(folder.path);
+            } else {
+              _expanded.add(folder.path);
+            }
+          }),
           onTap: () => _openFolder(folder),
           onLongPress: () => _folderMenu(folder),
-          trailing: nested.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () => setState(() {
-                    if (open) {
-                      _expanded.remove(folder.path);
-                    } else {
-                      _expanded.add(folder.path);
-                    }
-                  }),
-                  icon: Icon(open ? Icons.expand_less : Icons.expand_more),
-                ),
         ),
         if (open)
           for (final child in nested) _folderTile(child, depth + 1),
@@ -378,6 +392,17 @@ class _NotesPageState extends State<_NotesPage> {
   }
 
   String _noteTitle(_Node note) => note.title.isEmpty ? note.name : note.title;
+
+  /// 一行摘要：时间在前，正文在后面，跟苹果备忘录一致。
+  String _notePreview(_Node note) {
+    final when = reflectionRowTimeLabel(
+      note.updatedAt.isEmpty ? note.occurredAt : note.updatedAt,
+      DateTime.now(),
+    );
+    final excerpt = note.excerpt.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final line = [when, excerpt].where((part) => part.isNotEmpty).join('  ');
+    return line.isEmpty ? '无正文' : line;
+  }
 
   Future<void> _noteMenu(_Node note) async {
     final action = await _pickNodeAction(context, const [
@@ -656,9 +681,9 @@ class _NotesPageState extends State<_NotesPage> {
                 if (_folder.folders.isNotEmpty)
                   const ListTile(dense: true, title: Text('文件夹')),
                 for (final folder in _folder.folders)
-                  ListTile(
-                    leading: const Icon(Icons.folder_outlined),
-                    title: Text(folder.name),
+                  ReflectionFolderRow(
+                    name: folder.name,
+                    noteCount: folder.totalNotes,
                     onTap: () async {
                       await Navigator.of(context).push(
                         MaterialPageRoute<void>(
@@ -676,8 +701,9 @@ class _NotesPageState extends State<_NotesPage> {
                 for (final label in labels) ...[
                   ListTile(dense: true, title: Text(label)),
                   for (final note in groups[label]!)
-                    ListTile(
-                      title: Text(_noteTitle(note)),
+                    ReflectionNoteRow(
+                      title: _noteTitle(note),
+                      preview: _notePreview(note),
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute<void>(

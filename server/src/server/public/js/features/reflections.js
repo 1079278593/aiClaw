@@ -54,16 +54,42 @@ export function createReflectionsFeature({ state, actions }) {
     syncPreview();
   }
 
+  const FOLDER_ICON = `<svg class="reflections-folder-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.2c0-.7.6-1.2 1.2-1.2h3.6l1.5 1.7h7.5c.7 0 1.2.6 1.2 1.2v8.4c0 .7-.6 1.2-1.2 1.2H3.7c-.7 0-1.2-.5-1.2-1.2V5.2Z"/></svg>`;
+  const CHEVRON_ICON = `<svg class="reflections-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>`;
+
+  function folderNoteCountOf(node) {
+    if (typeof node?.noteCount === "number") return node.noteCount;
+    return (node?.children || []).reduce(
+      (total, child) => total + (child.kind === "file" ? 1 : folderNoteCountOf(child)),
+      0,
+    );
+  }
+
+  function folderRowHtml(node, depth, extraClass = "", dataAttr = "data-folder", expandable = true) {
+    const children = (node.children || []).filter((child) => child.kind === "directory");
+    const open = expanded.has(node.path);
+    const count = folderNoteCountOf(node);
+    const toggle = !expandable || !children.length
+      ? `<span class="reflections-expand-spacer"></span>`
+      : `<button type="button" class="reflections-expand" data-expand="${escHtml(node.path)}" aria-label="${open ? "折叠" : "展开"}">${open ? "▾" : "▸"}</button>`;
+    return `
+      <div class="reflections-folder-row" style="padding-left:${8 + depth * 14}px">
+        ${toggle}
+        <button type="button" class="reflections-folder ${extraClass}" ${dataAttr}="${escHtml(node.path)}" title="右键或长按：重命名、删除文件夹">
+          ${FOLDER_ICON}
+          <span class="reflections-folder-name">${escHtml(node.name || "/")}</span>
+          <span class="reflections-folder-count">${count}</span>
+          ${CHEVRON_ICON}
+        </button>
+      </div>`;
+  }
+
   function renderFolderNodes(nodes, depth) {
     return (nodes || []).filter((node) => node.kind === "directory").map((node) => {
       const children = (node.children || []).filter((child) => child.kind === "directory");
       const open = expanded.has(node.path);
       const active = selectedFolder === node.path ? "active" : "";
-      return `
-        <div class="reflections-folder-row" style="padding-left:${8 + depth * 14}px">
-          <button type="button" class="reflections-folder ${active}" data-folder="${escHtml(node.path)}" title="右键或长按：重命名、删除文件夹">${escHtml(node.name || "/")}</button>
-          ${children.length ? `<button type="button" class="reflections-expand" data-expand="${escHtml(node.path)}">${open ? "▾" : "▸"}</button>` : ""}
-        </div>
+      return `${folderRowHtml(node, depth, active)}
         ${open ? renderFolderNodes(children, depth + 1) : ""}`;
     }).join("");
   }
@@ -111,6 +137,24 @@ export function createReflectionsFeature({ state, actions }) {
     });
   }
 
+  function noteTimeLabel(iso) {
+    const at = new Date(iso || "");
+    if (Number.isNaN(at.getTime())) return "";
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    if (at.toDateString() === now.toDateString()) return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    if (at.getFullYear() === now.getFullYear()) return `${at.getMonth() + 1}月${at.getDate()}日`;
+    return `${at.getFullYear()}年${at.getMonth() + 1}月${at.getDate()}日`;
+  }
+
+  /** 苹果备忘录那行：时间在前，正文摘要跟在后面，整行只占一行。 */
+  function notePreviewLine(note) {
+    const when = noteTimeLabel(note.updatedAt || note.occurredAt);
+    const excerpt = String(note.excerpt || note.context || "").replace(/\s+/g, " ").trim();
+    const line = [when, excerpt].filter(Boolean).join("  ");
+    return line || "无正文";
+  }
+
   function renderStage() {
     const panel = document.getElementById("document-panel");
     if (!panel || state.workspace !== "reflections") return;
@@ -131,13 +175,14 @@ export function createReflectionsFeature({ state, actions }) {
     stage.innerHTML = `
       <div class="reflections-notes">
         ${subfolders.length ? `<div class="reflections-subfolders">${subfolders.map((node) =>
-          `<button type="button" class="reflections-folder" data-open-folder="${escHtml(node.path)}">${escHtml(node.name)}</button>`
+          folderRowHtml(node, 0, "", "data-open-folder", false)
         ).join("")}</div>` : ""}
         ${groups.map((group) => `
           <h3 class="reflections-group">${escHtml(group.label)}</h3>
           ${group.notes.map((note) => `
             <button type="button" class="reflections-row ${note.path === currentPath ? "active" : ""}" data-path="${escHtml(note.path)}" title="右键或长按：重命名、移动、删除">
-              <strong>${escHtml(note.title || note.name || "未命名")}</strong>
+              <strong class="reflections-row-title">${escHtml(note.title || note.name || "未命名")}</strong>
+              <span class="reflections-row-meta">${escHtml(notePreviewLine(note))}</span>
             </button>`).join("")}
         `).join("")}
         <div class="reflections-composer">
@@ -272,12 +317,6 @@ export function createReflectionsFeature({ state, actions }) {
 
   let mediaPreviewTimer = null;
   let mediaPreviewGeneration = 0;
-  const blobUrls = new Set();
-
-  function revokeBlobUrls() {
-    for (const url of blobUrls) URL.revokeObjectURL(url);
-    blobUrls.clear();
-  }
 
   function scheduleMediaPreview() {
     clearTimeout(mediaPreviewTimer);
@@ -314,15 +353,32 @@ export function createReflectionsFeature({ state, actions }) {
     return attrs;
   }
 
-  async function mediaBlobUrl(mediaPath) {
-    const response = await fetch(`/api/reflections/media?path=${encodeURIComponent(mediaPath)}`, {
-      headers: authHeaders(),
-    });
-    if (!response.ok) throw new Error("媒体加载失败");
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    blobUrls.add(url);
-    return url;
+  const mediaCache = new Map();
+
+  function clearMediaCache() {
+    for (const entry of mediaCache.values()) {
+      if (entry.url) URL.revokeObjectURL(entry.url);
+    }
+    mediaCache.clear();
+  }
+
+  /** 同一路径只发一次请求；失败的条目会被移除，下次还能重试。 */
+  function mediaBlobUrl(mediaPath) {
+    const hit = mediaCache.get(mediaPath);
+    if (hit) return hit.promise;
+    const entry = { url: "", promise: null };
+    entry.promise = (async () => {
+      const response = await fetch(`/api/reflections/media?path=${encodeURIComponent(mediaPath)}`, {
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("媒体加载失败");
+      const blob = await response.blob();
+      entry.url = URL.createObjectURL(blob);
+      return entry.url;
+    })();
+    entry.promise.catch(() => mediaCache.delete(mediaPath));
+    mediaCache.set(mediaPath, entry);
+    return entry.promise;
   }
 
   function syncBodyFromPieces() {
@@ -673,6 +729,11 @@ export function createReflectionsFeature({ state, actions }) {
     const notePath = draft?.path || currentPath;
     if (src && notePath) {
       const mediaPath = resolveMediaPath(notePath, src);
+      const cached = mediaCache.get(mediaPath);
+      if (cached) {
+        if (cached.url) URL.revokeObjectURL(cached.url);
+        mediaCache.delete(mediaPath);
+      }
       const { response, data } = await requestJson(
         `/api/reflections/media?path=${encodeURIComponent(mediaPath)}`,
         jsonRequest("DELETE"),
@@ -703,7 +764,14 @@ export function createReflectionsFeature({ state, actions }) {
     const body = hidden.value ?? draft?.body ?? "";
     const generation = ++mediaPreviewGeneration;
     const pieces = splitReflectionPieces(body);
-    revokeBlobUrls();
+    // 先把所有附件并行拉进缓存，避免一块一块串行等待
+    if (notePath) {
+      for (const piece of pieces) {
+        if (piece.kind === "text") continue;
+        const mediaPath = resolveMediaPath(notePath, piece.src);
+        if (mediaPath) void mediaBlobUrl(mediaPath).catch(() => undefined);
+      }
+    }
     bindEditor(host);
     host.dataset.rendering = "1";
     host.replaceChildren();
@@ -744,6 +812,7 @@ export function createReflectionsFeature({ state, actions }) {
         } catch {
           block.innerHTML = `<p class="empty-state-copy">无法加载图片</p>`;
         }
+        bindLongPressMenu(block, (x, y) => showAttachmentMenu(block, x, y));
         host.append(block);
         continue;
       }
@@ -884,13 +953,222 @@ export function createReflectionsFeature({ state, actions }) {
     return draft.path;
   }
 
+  const MAX_UPLOAD_IMAGE_BYTES = 20 * 1024 * 1024;
+  const CLIENT_IMAGE_MAX_EDGE = 2048;
+
+  function loadImageElement(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => resolve({ img, url });
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("图片读取失败"));
+      };
+      img.src = url;
+    });
+  }
+
+  /** 模态裁剪框：拖选区移动，四角缩放。返回 null（取消）/ "skip"（不裁剪）/ { rect }。 */
+  function openCropDialog(img, url) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "image-crop-overlay";
+      overlay.innerHTML = `
+        <div class="image-crop-panel" role="dialog" aria-label="裁剪图片">
+          <div class="image-crop-head">
+            <strong>裁剪图片</strong>
+            <span>拖动选区移动，四角缩放</span>
+          </div>
+          <div class="image-crop-stage">
+            <div class="image-crop-frame">
+              <img src="${url}" alt="">
+              <div class="image-crop-box">
+                <span class="image-crop-grid"></span>
+                <i data-handle="nw"></i><i data-handle="ne"></i><i data-handle="sw"></i><i data-handle="se"></i>
+              </div>
+            </div>
+          </div>
+          <div class="image-crop-actions">
+            <button type="button" data-act="cancel">取消</button>
+            <button type="button" data-act="skip">不裁剪</button>
+            <button type="button" data-act="ok" class="primary">完成</button>
+          </div>
+        </div>`;
+      document.body.append(overlay);
+      const frame = overlay.querySelector(".image-crop-frame");
+      const box = overlay.querySelector(".image-crop-box");
+      const MIN = 44;
+      let frameW = 0;
+      let frameH = 0;
+      const rect = { x: 0, y: 0, w: 0, h: 0 };
+
+      const apply = () => {
+        box.style.left = `${rect.x}px`;
+        box.style.top = `${rect.y}px`;
+        box.style.width = `${rect.w}px`;
+        box.style.height = `${rect.h}px`;
+      };
+
+      const init = () => {
+        const bounds = frame.getBoundingClientRect();
+        frameW = bounds.width;
+        frameH = bounds.height;
+        rect.w = Math.round(frameW * 0.88);
+        rect.h = Math.round(frameH * 0.88);
+        rect.x = Math.round((frameW - rect.w) / 2);
+        rect.y = Math.round((frameH - rect.h) / 2);
+        apply();
+      };
+
+      let drag = null;
+      const onDown = (event) => {
+        const handle = event.target.dataset?.handle || "";
+        if (!handle && !event.target.closest(".image-crop-box")) return;
+        event.preventDefault();
+        drag = {
+          handle,
+          startX: event.clientX,
+          startY: event.clientY,
+          rect: { ...rect },
+        };
+        box.setPointerCapture?.(event.pointerId);
+      };
+      const onMove = (event) => {
+        if (!drag) return;
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        const base = drag.rect;
+        if (!drag.handle) {
+          rect.x = Math.min(Math.max(0, base.x + dx), frameW - base.w);
+          rect.y = Math.min(Math.max(0, base.y + dy), frameH - base.h);
+          apply();
+          return;
+        }
+        let left = base.x;
+        let top = base.y;
+        let right = base.x + base.w;
+        let bottom = base.y + base.h;
+        if (drag.handle.includes("w")) left = Math.min(Math.max(0, base.x + dx), right - MIN);
+        if (drag.handle.includes("e")) right = Math.max(Math.min(frameW, base.x + base.w + dx), left + MIN);
+        if (drag.handle.includes("n")) top = Math.min(Math.max(0, base.y + dy), bottom - MIN);
+        if (drag.handle.includes("s")) bottom = Math.max(Math.min(frameH, base.y + base.h + dy), top + MIN);
+        rect.x = left;
+        rect.y = top;
+        rect.w = right - left;
+        rect.h = bottom - top;
+        apply();
+      };
+      const onUp = () => {
+        drag = null;
+      };
+
+      const close = (value) => {
+        overlay.remove();
+        window.removeEventListener("resize", init);
+        resolve(value);
+      };
+
+      overlay.addEventListener("pointerdown", onDown);
+      overlay.addEventListener("pointermove", onMove);
+      overlay.addEventListener("pointerup", onUp);
+      overlay.addEventListener("pointercancel", onUp);
+      overlay.addEventListener("click", (event) => {
+        const act = event.target.dataset?.act;
+        if (!act) return;
+        if (act === "cancel") close(null);
+        else if (act === "skip") close("skip");
+        else close({ rect: { ...rect }, frameW, frameH });
+      });
+      overlay.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") close(null);
+      });
+      window.addEventListener("resize", init);
+      if (img.complete) init();
+      else img.addEventListener("load", init, { once: true });
+    });
+  }
+
+  function canvasHasAlpha(ctx, width, height) {
+    try {
+      const { data } = ctx.getImageData(0, 0, width, height);
+      const step = 4 * 97;
+      for (let i = 3; i < data.length; i += step) {
+        if (data[i] < 250) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 按显示比例还原到原图，裁完再限长边，减少上传体积。 */
+  async function cropImageToBlob(img, rect, frameW) {
+    const scale = img.naturalWidth / frameW;
+    const sx = Math.max(0, Math.round(rect.x * scale));
+    const sy = Math.max(0, Math.round(rect.y * scale));
+    const sw = Math.max(1, Math.min(Math.round(rect.w * scale), img.naturalWidth - sx));
+    const sh = Math.max(1, Math.min(Math.round(rect.h * scale), img.naturalHeight - sy));
+    const ratio = Math.min(1, CLIENT_IMAGE_MAX_EDGE / Math.max(sw, sh));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sw * ratio));
+    canvas.height = Math.max(1, Math.round(sh * ratio));
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const alpha = canvasHasAlpha(ctx, canvas.width, canvas.height);
+    const type = alpha ? "image/webp" : "image/jpeg";
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("裁剪失败"))),
+        type,
+        0.92,
+      );
+    });
+  }
+
+  async function prepareImageFile(file) {
+    if (!file.type.startsWith("image/")) {
+      actions.showError?.("只能插入图片文件");
+      return null;
+    }
+    if (file.size > MAX_UPLOAD_IMAGE_BYTES) {
+      actions.showError?.("图片太大（超过 20MB），请先压缩或裁剪");
+      return null;
+    }
+    // 动图保留原样，裁剪会丢帧
+    if (file.type === "image/gif") return file;
+    const { img, url } = await loadImageElement(file);
+    try {
+      const result = await openCropDialog(img, url);
+      if (result === null) return null;
+      if (result === "skip") return file;
+      const blob = await cropImageToBlob(img, result.rect, result.frameW);
+      const ext = blob.type === "image/webp" ? ".webp" : ".jpg";
+      const base = (file.name || "image").replace(/\.[^.]+$/, "");
+      return new File([blob], `${base}${ext}`, { type: blob.type });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function insertImageFile(file) {
+    let payload = file;
+    try {
+      const prepared = await prepareImageFile(file);
+      if (!prepared) return;
+      payload = prepared;
+    } catch {
+      actions.showError?.("图片读取失败");
+      return;
+    }
     const notePath = await ensureNotePath();
     if (!notePath) return;
     const body = new FormData();
     body.set("path", notePath);
     body.set("kind", "image");
-    body.set("file", file, file.name || "image.jpg");
+    body.set("file", payload, payload.name || "image.jpg");
     const { response, data } = await requestJson("/api/reflections/media", { method: "POST", body });
     if (!response.ok) {
       actions.showError?.(data.error || "上传失败");
@@ -1147,6 +1425,7 @@ export function createReflectionsFeature({ state, actions }) {
       actions.showError?.(data.error || "打开失败");
       return;
     }
+    clearMediaCache();
     currentPath = data.reflection.path;
     draft = { ...data.reflection };
     dirty = false;
@@ -1157,6 +1436,7 @@ export function createReflectionsFeature({ state, actions }) {
 
   async function beginNew() {
     if (!(await ensureSaved())) return;
+    clearMediaCache();
     currentPath = "";
     draft = { title: "", body: "", folder: folderKey(selectedFolder) || "inbox" };
     dirty = false;

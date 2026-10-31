@@ -19,4 +19,35 @@ void main() {
     );
     expect(labels, ['今天', '昨天', '前 30 天', '2025', '2024']);
   });
+
+  group('笔记行的时间前缀', () {
+    // 全部按东八区算：UTC 时间 +8 小时即本地时间。
+    final at = DateTime.utc(2026, 10, 31, 6); // 北京 2026-10-31 14:00
+
+    test('今天显示时刻', () {
+      expect(reflectionRowTimeLabel('2026-10-31T05:32:00.000Z', at), '13:32');
+      expect(reflectionRowTimeLabel('2026-10-30T16:05:00.000Z', at), '00:05');
+    });
+
+    test('昨天给「昨天」，本年内给月日，跨年给年月日', () {
+      expect(reflectionRowTimeLabel('2026-10-30T03:00:00.000Z', at), '昨天');
+      expect(reflectionRowTimeLabel('2026-10-20T03:00:00.000Z', at), '10月20日');
+      expect(
+        reflectionRowTimeLabel('2025-12-31T03:00:00.000Z', at),
+        '2025年12月31日',
+      );
+    });
+
+    test('解析不了时返回空串，交给摘要占位', () {
+      expect(reflectionRowTimeLabel('', at), '');
+      expect(reflectionRowTimeLabel('不是时间', at), '');
+      expect(reflectionRowTimeLabel(null, at), '');
+    });
+
+    test('和分组标签用同一套东八区日期', () {
+      final lateNight = DateTime.utc(2026, 10, 22, 16, 30); // 北京 10-23 00:30
+      expect(reflectionGroupLabel(lateNight.toIso8601String(), at), '前 30 天');
+      expect(reflectionRowTimeLabel(lateNight.toIso8601String(), at), '10月23日');
+    });
+  });
 }
