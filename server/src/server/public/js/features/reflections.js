@@ -50,9 +50,9 @@ export function createReflectionsFeature({ state, actions }) {
     const { data } = await requestJson("/api/reflections?view=tree");
     tree = (data.tree || []).filter((node) => node.kind === "directory");
     renderFolders();
-    renderStage();
-    syncPreview();
-  }
+      renderStage();
+      syncPreview();
+    }
 
   const FOLDER_ICON = `<svg class="reflections-folder-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.2c0-.7.6-1.2 1.2-1.2h3.6l1.5 1.7h7.5c.7 0 1.2.6 1.2 1.2v8.4c0 .7-.6 1.2-1.2 1.2H3.7c-.7 0-1.2-.5-1.2-1.2V5.2Z"/></svg>`;
   const CHEVRON_ICON = `<svg class="reflections-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>`;
@@ -98,20 +98,20 @@ export function createReflectionsFeature({ state, actions }) {
     const list = document.getElementById("reflections-list");
     const toolbar = document.getElementById("reflections-toolbar");
     if (toolbar) {
-      toolbar.innerHTML = `
+    toolbar.innerHTML = `
         <button type="button" id="reflections-mkdir">新建文件夹</button>
-        <button type="button" id="reflections-import">粘贴导入</button>
-        <button type="button" id="reflections-import-file">拆分文件</button>
+      <button type="button" id="reflections-import">粘贴导入</button>
+      <button type="button" id="reflections-import-file">拆分文件</button>
         <button type="button" id="reflections-orphans">检查孤儿附件</button>`;
       toolbar.querySelector("#reflections-mkdir")?.addEventListener("click", () => void makeDir());
-      toolbar.querySelector("#reflections-import")?.addEventListener("click", () => void importPaste());
-      toolbar.querySelector("#reflections-import-file")?.addEventListener("click", () => void importFile());
+    toolbar.querySelector("#reflections-import")?.addEventListener("click", () => void importPaste());
+    toolbar.querySelector("#reflections-import-file")?.addEventListener("click", () => void importFile());
       toolbar.querySelector("#reflections-orphans")?.addEventListener("click", () => void checkOrphans());
     }
     if (!list) return;
     list.innerHTML = renderFolderNodes(tree, 0) || `<p class="empty-state-copy">还没有文件夹</p>`;
-    list.querySelectorAll("[data-folder]").forEach((button) => {
-      button.addEventListener("click", () => {
+      list.querySelectorAll("[data-folder]").forEach((button) => {
+        button.addEventListener("click", () => {
         if (Date.now() - menuShownAt < 400) return;
         void (async () => {
           if (!(await ensureSaved())) return;
@@ -189,7 +189,7 @@ export function createReflectionsFeature({ state, actions }) {
           <textarea id="reflection-quick" rows="2" placeholder="写下来"></textarea>
           <button type="button" id="reflection-publish">创建</button>
         </div>
-        <div class="reflections-editor">
+      <div class="reflections-editor">
           <input id="reflection-title" type="text" placeholder="标题" value="${escHtml(draft?.title || "")}">
           <div class="reflections-media-toolbar">
             <button type="button" id="reflection-insert-image">插入图片</button>
@@ -200,12 +200,12 @@ export function createReflectionsFeature({ state, actions }) {
           <div id="reflection-composed" class="reflection-composed"></div>
           <div id="reflection-media-preview" class="reflections-media-preview" hidden></div>
           <div id="reflection-assets-overview" class="reflections-assets-overview"></div>
-          <div class="reflections-actions">
+        <div class="reflections-actions">
             <span id="reflection-save-status" class="reflections-save-status">${escHtml(statusLabel())}</span>
             <button type="button" id="reflection-new">新建</button>
-            <button type="button" id="reflection-move">移动到…</button>
-            <button type="button" id="reflection-organize">按日期归夹</button>
-            <button type="button" id="reflection-delete">删除</button>
+          <button type="button" id="reflection-move">移动到…</button>
+          <button type="button" id="reflection-organize">按日期归夹</button>
+          <button type="button" id="reflection-delete">删除</button>
           </div>
         </div>
       </div>`;
@@ -309,6 +309,7 @@ export function createReflectionsFeature({ state, actions }) {
   }
 
   function readForm() {
+    syncBodyFromPieces();
     return {
       title: document.getElementById("reflection-title")?.value ?? "",
       body: document.getElementById("reflection-body")?.value ?? "",
@@ -385,7 +386,11 @@ export function createReflectionsFeature({ state, actions }) {
     const hidden = document.getElementById("reflection-body");
     const host = document.getElementById("reflection-composed");
     if (!hidden || !host) return;
-    hidden.value = serializeEditor(host).after;
+    if (host.dataset.rendering === "1") return;
+    const next = serializeEditor(host).after;
+    // 预览重绘时 composed 会短暂为空，不能把 hidden 里的正文同步成空再触发自动保存。
+    if (!next.trim() && hidden.value.trim()) return;
+    hidden.value = next;
   }
 
   function serializeEditor(root, pivot = null) {
@@ -1480,9 +1485,9 @@ export function createReflectionsFeature({ state, actions }) {
       }
       const wasCreate = creating;
       const prevPath = draft.path || "";
-      draft = data.reflection;
-      currentPath = draft.path;
-      dirty = false;
+    draft = data.reflection;
+    currentPath = draft.path;
+    dirty = false;
       saveStatus = "saved";
       updateSaveStatus();
       // 首次创建、标题致改名后刷新列表；普通更新只改标题行，避免打断输入焦点
@@ -1671,16 +1676,16 @@ export function createReflectionsFeature({ state, actions }) {
   function setWorkspace(next) {
     void (async () => {
       if (next !== "reflections" && !(await ensureSaved())) return;
-      state.workspace = next;
-      applyWorkspaceChrome(next);
-      if (next === "reflections") {
-        state.personThread = null;
+    state.workspace = next;
+    applyWorkspaceChrome(next);
+    if (next === "reflections") {
+      state.personThread = null;
         void loadTree();
-      } else {
-        syncPreview();
-      }
-      remount();
-      actions.peopleRemount?.();
+    } else {
+      syncPreview();
+    }
+    remount();
+    actions.peopleRemount?.();
     })();
   }
 

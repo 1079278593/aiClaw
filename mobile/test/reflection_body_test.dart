@@ -42,4 +42,11 @@ void main() {
     );
     expect(ReflectionPiece.audio(raw: '', id: 'i', src: 's', transcript: '').audioTitle, '录音');
   });
+
+  test('reflectionPiecesKey distinguishes single text segments by content', () {
+    final a = splitReflectionBody('第一段');
+    final b = splitReflectionBody('第二段');
+    expect(reflectionPiecesKey(a), isNot(reflectionPiecesKey(b)));
+    expect(reflectionPiecesKey(a), reflectionPiecesKey(splitReflectionBody('第一段')));
+  });
 }

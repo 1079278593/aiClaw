@@ -91,6 +91,16 @@ String composeReflectionBody(List<ReflectionPiece> pieces) {
   return pieces.map((piece) => piece.kind == 'text' ? piece.text : piece.raw).join();
 }
 
+/// 片段结构指纹：纯文字段必须带上正文，否则「只有一段文字」的笔记在加载前后会被误判成同一结构。
+int reflectionPiecesKey(List<ReflectionPiece> pieces) {
+  return Object.hashAll(
+    pieces.map((piece) {
+      if (piece.kind == 'text') return Object.hash('text', piece.text);
+      return Object.hash(piece.kind, piece.raw);
+    }),
+  );
+}
+
 Map<String, String> parseReflectionAttrs(String raw) {
   final out = <String, String>{};
   final parts = RegExp(r'(?:[^\s"]+|"[^"]*")+' ).allMatches(raw);

@@ -231,6 +231,7 @@ inputs/reflections/<folder>/
 - `move` / 按日期归夹：同一操作移动 `*.md` + 同名 `*.assets/`（若存在）；相对链接无需改写。
 - 删除篇时一并删除对应 `.assets/`。
 - 用户在 NAS 上手拖时，md 与 `.assets` 应一起拖。
+- 覆盖或删除前，服务端先把当前版本存到 `<data>/.reflection-history/<篇相对路径>/<时间戳>.md`，每个文件保留最近 3 份。这个目录在 `inputs/reflections` 之外，不进心得树，也不受移动/改名影响。误覆盖后可直接从那里取回。
 
 图片上传：客户端先裁剪（网页 canvas、App 全屏裁剪框），再交给服务端统一处理：
 

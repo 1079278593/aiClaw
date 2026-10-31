@@ -142,6 +142,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
       _title.addListener(_onEdited);
       _body.addListener(_onEdited);
       _reloadPieces();
+      if (mounted) setState(() {});
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -159,6 +160,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
   }
 
   Future<bool> _save({required bool quiet}) async {
+    _syncBodyFromPieceControllers();
     final rawTitle = _title.text.trim();
     final body = _body.text;
     final title = rawTitle.isNotEmpty
@@ -266,9 +268,18 @@ class _ReflectionPageState extends State<ReflectionPage> {
 
   void _reloadPieces() {
     final next = splitReflectionBody(_body.text);
-    final key = Object.hashAll(next.map((piece) => piece.kind == 'text' ? 'text' : piece.raw));
+    final key = reflectionPiecesKey(next);
     _pieces = next;
-    if (key == _pieceKey && _pieceControllers.length == next.where((piece) => piece.kind == 'text').length) {
+    final textCount = next.where((piece) => piece.kind == 'text').length;
+    if (key == _pieceKey && _pieceControllers.length == textCount) {
+      var index = 0;
+      for (final piece in next.where((piece) => piece.kind == 'text')) {
+        if (index < _pieceControllers.length &&
+            _pieceControllers[index].text != piece.text) {
+          _pieceControllers[index].text = piece.text;
+        }
+        index += 1;
+      }
       return;
     }
     final retired = _pieceControllers;
@@ -291,6 +302,29 @@ class _ReflectionPageState extends State<ReflectionPage> {
         if (!_pieceControllers.contains(controller)) controller.dispose();
       }
     });
+  }
+
+  void _syncBodyFromPieceControllers() {
+    if (_pieceControllers.isEmpty) return;
+    var textIndex = 0;
+    final next = <ReflectionPiece>[];
+    for (final piece in _pieces) {
+      if (piece.kind != 'text') {
+        next.add(piece);
+        continue;
+      }
+      final controller =
+          textIndex < _pieceControllers.length ? _pieceControllers[textIndex] : null;
+      textIndex += 1;
+      next.add(controller != null ? piece.withText(controller.text) : piece);
+    }
+    _pieces = next;
+    final composed = composeReflectionBody(next);
+    if (composed.trim().isEmpty && _body.text.trim().isNotEmpty) return;
+    if (_body.text == composed) return;
+    _body.removeListener(_onEdited);
+    _body.text = composed;
+    _body.addListener(_onEdited);
   }
 
   void _onPieceText(TextEditingController controller) {

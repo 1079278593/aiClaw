@@ -286,6 +286,42 @@ async function writeAtomic(file: string, content: string): Promise<void> {
   await rename(tmp, file);
 }
 
+/** 历史版本留在 data 根下，不进心得树，也不会被移动/改名操作带走。 */
+const HISTORY_DIR = ".reflection-history";
+/** 只留最近几版，够应对误保存/误删；长期归档靠 NAS 快照或 git。 */
+const HISTORY_KEEP = 3;
+
+function historyDirFor(relativePath: string, userDataDir?: string): string {
+  return path.join(getPaths(userDataDir).base, HISTORY_DIR, relativePath);
+}
+
+/** 覆盖或删除前先把当前版本存一份，防止误覆盖后无法找回。 */
+async function snapshotBeforeChange(relativePath: string, userDataDir?: string): Promise<void> {
+  const { absolutePath } = resolveReflectionPath(relativePath, userDataDir);
+  try {
+    const raw = await readFile(absolutePath, "utf-8");
+    const dir = historyDirFor(relativePath, userDataDir);
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    let target = path.join(dir, `${stamp}.md`);
+    for (let seq = 1; seq < 1000; seq += 1) {
+      try {
+        await stat(target);
+        target = path.join(dir, `${stamp}-${seq}.md`);
+      } catch {
+        break;
+      }
+    }
+    await writeAtomic(target, raw);
+    const entries = (await readdir(dir)).filter((name) => name.endsWith(".md")).sort();
+    for (const stale of entries.slice(0, Math.max(0, entries.length - HISTORY_KEEP))) {
+      await rm(path.join(dir, stale)).catch(() => undefined);
+    }
+  } catch {
+    // 备份失败不阻断正常写入
+  }
+}
+
 export async function createReflection(input: {
   title: string;
   body?: string;
@@ -331,6 +367,14 @@ export async function updateReflection(input: {
   const title = input.title !== undefined ? String(input.title).trim() : current.title;
   if (!title) throw new ReflectionsError("标题不能为空", 400);
   let bodyText = input.body !== undefined ? String(input.body) : current.body;
+  // 客户端 bug 曾用空串覆盖整篇正文；已有内容时不接受「清空式」保存（真要删光需先写占位再删）。
+  if (
+    input.body !== undefined
+    && !bodyText.trim()
+    && current.body.trim().length > 0
+  ) {
+    bodyText = current.body;
+  }
 
   // .txt 先视为同主名 .md，再决定是否因标题改名
   let workAbs = absolutePath;
@@ -362,6 +406,7 @@ export async function updateReflection(input: {
     updatedAt: now,
     body: bodyText,
   });
+  await snapshotBeforeChange(relativePath, input.userDataDir);
   await writeAtomic(destAbs, content);
   if (destAbs !== absolutePath) {
     await rm(absolutePath).catch(() => undefined);
@@ -381,6 +426,7 @@ function assetsDirRelativeNeedsMove(fromRel: string, toRel: string): boolean {
 
 export async function deleteReflection(inputPath: string, userDataDir?: string): Promise<void> {
   const { absolutePath, relativePath } = resolveReflectionPath(inputPath, userDataDir);
+  await snapshotBeforeChange(relativePath, userDataDir);
   try {
     await rm(absolutePath);
   } catch (error) {

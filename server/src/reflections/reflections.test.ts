@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
@@ -414,6 +414,39 @@ describe("reflections store", () => {
 
     const shortNote = themeFolder?.children?.find((node) => node.kind === "file");
     expect(shortNote?.excerpt).toBe("只有一句话");
+  });
+
+  it("keeps a copy of the previous version before overwriting or deleting", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "会丢正文",
+      body: "第一版正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    await updateReflection({
+      path: created.path,
+      title: "会丢正文",
+      body: "第二版正文",
+      userDataDir: dir,
+    });
+    const historyDir = path.join(dir, ".reflection-history", created.path);
+    const versions = (await readdir(historyDir)).filter((name) => name.endsWith(".md"));
+    expect(versions).toHaveLength(1);
+    const saved = await readFile(path.join(historyDir, versions[0]), "utf-8");
+    expect(saved).toContain("第一版正文");
+
+    // 空正文覆盖也能找回上一版
+    await updateReflection({ path: created.path, title: "会丢正文", body: "", userDataDir: dir });
+    const still = await readReflection(created.path, dir);
+    expect(still.body).toContain("第二版正文");
+    const after = (await readdir(historyDir)).filter((name) => name.endsWith(".md")).sort();
+    expect(after).toHaveLength(2);
+
+    // 删除同样留底
+    await deleteReflection(created.path, dir);
+    const onDelete = (await readdir(historyDir)).filter((name) => name.endsWith(".md"));
+    expect(onDelete).toHaveLength(3);
   });
 
   it("renames and deletes folders with their notes inside", async () => {    const dir = await setup();
