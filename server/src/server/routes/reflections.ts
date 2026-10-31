@@ -2,6 +2,7 @@ import {
   ReflectionsError,
   createReflection,
   deleteReflection,
+  deleteReflectionFolder,
   importReflections,
   listReflectionTree,
   listReflections,
@@ -9,9 +10,11 @@ import {
   moveReflection,
   organizeReflectionByDate,
   readReflection,
+  renameReflectionFolder,
   updateReflection,
 } from "../../reflections/store.js";
 import {
+  deleteReflectionMedia,
   listNoteAssets,
   listOrphanAssets,
   readReflectionMediaFile,
@@ -115,6 +118,18 @@ export const handleReflectionsRoutes: RouteHandler = async ({ req, res, url }) =
       return true;
     }
 
+    if (url.pathname === "/api/reflections/rename-folder" && req.method === "POST") {
+      const body = await readJsonBody<{ path?: string; name?: string }>(req);
+      sendJson(res, await renameReflectionFolder({ path: body.path ?? "", name: body.name }));
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/folder" && req.method === "DELETE") {
+      await deleteReflectionFolder(url.searchParams.get("path") ?? "");
+      sendJson(res, { ok: true });
+      return true;
+    }
+
     if (url.pathname === "/api/reflections/move" && req.method === "POST") {
       const body = await readJsonBody<{ from?: string; toFolder?: string; toPath?: string }>(req);
       sendJson(res, {
@@ -162,6 +177,12 @@ export const handleReflectionsRoutes: RouteHandler = async ({ req, res, url }) =
       res.setHeader("Content-Type", file.mime);
       res.setHeader("Cache-Control", "no-cache");
       res.end(file.data);
+      return true;
+    }
+
+    if (url.pathname === "/api/reflections/media" && req.method === "DELETE") {
+      await deleteReflectionMedia(url.searchParams.get("path") ?? "");
+      sendJson(res, { ok: true });
       return true;
     }
 

@@ -711,72 +711,80 @@ class _ReflectionPageState extends State<ReflectionPage> {
     final when = audioRecordedLabel(item.id);
     final length = formatAudioLength(_audioDuration[item.src]);
     final excerpt = item.transcript.isEmpty ? '无' : item.transcript;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-      decoration: BoxDecoration(
-        color: scheme.brightness == Brightness.dark ? const Color(0xFF2C2C2C) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.onSurface.withValues(alpha: 0.28)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('录音', style: Theme.of(context).textTheme.titleMedium),
-          if (when.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(when, style: Theme.of(context).textTheme.bodySmall),
-            ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(length, style: Theme.of(context).textTheme.bodySmall),
-          ),
-          Divider(height: 16, color: scheme.onSurface.withValues(alpha: 0.2)),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('听写文本', style: Theme.of(context).textTheme.labelLarge),
-                    const SizedBox(height: 2),
-                    GestureDetector(
-                      onLongPress: () => unawaited(_editTranscript(item)),
-                      child: Text(
-                        excerpt,
-                        maxLines: 2,
+    final small = Theme.of(context).textTheme.bodySmall;
+    return GestureDetector(
+      onLongPress: () => unawaited(_showAudioMenu(item)),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
+        decoration: BoxDecoration(
+          color: scheme.brightness == Brightness.dark ? const Color(0xFF2C2C2C) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: scheme.onSurface.withValues(alpha: 0.28)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.audioTitle,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
-                    ),
-                  ],
+                      if (when.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(when, style: small),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(length, style: small),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              if (!showTransport)
-                IconButton(
-                  tooltip: '播放',
-                  onPressed: () => unawaited(_togglePlay(item)),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 32),
-                )
-              else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _seekButton(item, -15, Icons.replay_rounded),
-                    IconButton(
-                      tooltip: playing ? '暂停' : '播放',
-                      onPressed: () => unawaited(_togglePlay(item)),
-                      icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 32),
-                    ),
-                    _seekButton(item, 15, Icons.forward_rounded),
-                  ],
-                ),
-            ],
-          ),
-        ],
+                if (!showTransport)
+                  IconButton(
+                    tooltip: '播放',
+                    onPressed: () => unawaited(_togglePlay(item)),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 32),
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _seekButton(item, -15, Icons.replay_rounded),
+                      IconButton(
+                        tooltip: playing ? '暂停' : '播放',
+                        onPressed: () => unawaited(_togglePlay(item)),
+                        icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 32),
+                      ),
+                      _seekButton(item, 15, Icons.forward_rounded),
+                    ],
+                  ),
+              ],
+            ),
+            Divider(height: 16, color: scheme.onSurface.withValues(alpha: 0.2)),
+            Text('听写文本', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 2),
+            Text(
+              excerpt,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -828,6 +836,169 @@ class _ReflectionPageState extends State<ReflectionPage> {
     );
   }
 
+  /// 改一条语音标记的转写或名称；标记原文变了，界面片段一起重画。
+  bool _rewriteAudioMarker(ReflectionPiece item, {String? name, String? transcript}) {
+    final body = _body.text;
+    RegExpMatch? match;
+    for (final candidate in _audioBlockRe.allMatches(body)) {
+      final attrs = parseReflectionAttrs(candidate.group(1) ?? '');
+      final hit = item.id.isNotEmpty ? attrs['id'] == item.id : attrs['src'] == item.src;
+      if (hit) {
+        match = candidate;
+        break;
+      }
+    }
+    if (match == null) return false;
+    final attrs = parseReflectionAttrs(match.group(1) ?? '');
+    final replacement = formatAudioBlock(
+      id: attrs['id'] ?? item.id,
+      src: attrs['src'] ?? item.src,
+      name: name ?? attrs['name'] ?? item.name,
+      transcript: transcript ?? (match.group(2) ?? '').trim(),
+    );
+    _body.removeListener(_onEdited);
+    _body.value = TextEditingValue(
+      text: body.replaceRange(match.start, match.end, replacement),
+    );
+    _body.addListener(_onEdited);
+    _reloadPieces();
+    _onEdited();
+    return true;
+  }
+
+  Future<void> _showAudioMenu(ReflectionPiece item) async {
+    final scheme = Theme.of(context).colorScheme;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('重命名'),
+              onTap: () => Navigator.pop(context, 'rename'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: const Text('编辑听写文本'),
+              onTap: () => Navigator.pop(context, 'transcript'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('删除', style: TextStyle(color: scheme.error)),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'rename') await _renameAudio(item);
+    if (action == 'transcript') await _editTranscript(item);
+    if (action == 'delete') await _deleteAudio(item);
+  }
+
+  Future<void> _renameAudio(ReflectionPiece item) async {
+    final controller = TextEditingController(text: item.name);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('录音名称'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '录音',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (next == null || !mounted) return;
+    if (!_rewriteAudioMarker(item, name: next.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('找不到对应语音块')),
+      );
+    }
+  }
+
+  Future<void> _deleteAudio(ReflectionPiece item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除录音'),
+        content: const Text('录音和听写文本都会删掉，原声文件一起删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final body = _body.text;
+    RegExpMatch? match;
+    for (final candidate in _audioBlockRe.allMatches(body)) {
+      final attrs = parseReflectionAttrs(candidate.group(1) ?? '');
+      final hit = item.id.isNotEmpty ? attrs['id'] == item.id : attrs['src'] == item.src;
+      if (hit) {
+        match = candidate;
+        break;
+      }
+    }
+    if (match == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('找不到对应语音块')),
+      );
+      return;
+    }
+    _body.removeListener(_onEdited);
+    _body.value = TextEditingValue(
+      text: body.replaceRange(match.start, match.end, ''),
+    );
+    _body.addListener(_onEdited);
+    if (_loadedSrc == item.src) {
+      await _player.stop();
+      _loadedSrc = null;
+      _transportSrc = null;
+    }
+    _localAudio.remove(item.src);
+    _audioDuration.remove(item.src);
+    _reloadPieces();
+    _onEdited();
+    await _flush();
+    final mediaPath = _resolveMediaPath(item.src);
+    if (mediaPath.isEmpty) return;
+    try {
+      await widget.controller.api.sendJson(
+        'DELETE',
+        apiUri(widget.controller.baseUrl, '/api/reflections/media', {'path': mediaPath}),
+        token: widget.controller.token,
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
   Future<void> _editTranscript(ReflectionPiece item) async {
     final controller = TextEditingController(text: item.transcript);
     final next = await showDialog<String>(
@@ -867,34 +1038,11 @@ class _ReflectionPageState extends State<ReflectionPage> {
     );
     controller.dispose();
     if (next == null || !mounted) return;
-    final body = _body.text;
-    RegExpMatch? match;
-    for (final candidate in _audioBlockRe.allMatches(body)) {
-      final attrs = parseReflectionAttrs(candidate.group(1) ?? '');
-      final hit = item.id.isNotEmpty
-          ? attrs['id'] == item.id
-          : attrs['src'] == item.src;
-      if (hit) {
-        match = candidate;
-        break;
-      }
-    }
-    if (match == null) {
+    if (!_rewriteAudioMarker(item, transcript: next.trim())) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('找不到对应语音块')),
       );
-      return;
     }
-    final attrs = parseReflectionAttrs(match.group(1) ?? '');
-    final replacement =
-        ':::aiclaw-audio[id=${attrs['id'] ?? item.id} src="${attrs['src'] ?? item.src}"]\n${next.trim()}\n:::';
-    _body.removeListener(_onEdited);
-    _body.value = TextEditingValue(
-      text: body.replaceRange(match.start, match.end, replacement),
-    );
-    _body.addListener(_onEdited);
-    _reloadPieces();
-    _onEdited();
   }
 
   Future<bool> _confirmLeave() async {

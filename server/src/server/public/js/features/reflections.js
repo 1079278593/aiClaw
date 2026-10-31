@@ -3,8 +3,6 @@ import { jsonRequest, requestJson } from "../api.js";
 import { escHtml } from "../format.js";
 
 const ROOT = "inputs/reflections";
-const AUDIO_BLOCK_RE = /^:::aiclaw-audio\[([^\]]*)\]\r?\n([\s\S]*?)^:::\s*$/gm;
-const IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
 const MAX_RECORD_MS = 5 * 60 * 1000;
 
 export function createReflectionsFeature({ state, actions }) {
@@ -63,7 +61,7 @@ export function createReflectionsFeature({ state, actions }) {
       const active = selectedFolder === node.path ? "active" : "";
       return `
         <div class="reflections-folder-row" style="padding-left:${8 + depth * 14}px">
-          <button type="button" class="reflections-folder ${active}" data-folder="${escHtml(node.path)}">${escHtml(node.name || "/")}</button>
+          <button type="button" class="reflections-folder ${active}" data-folder="${escHtml(node.path)}" title="右键或长按：重命名、删除文件夹">${escHtml(node.name || "/")}</button>
           ${children.length ? `<button type="button" class="reflections-expand" data-expand="${escHtml(node.path)}">${open ? "▾" : "▸"}</button>` : ""}
         </div>
         ${open ? renderFolderNodes(children, depth + 1) : ""}`;
@@ -88,6 +86,7 @@ export function createReflectionsFeature({ state, actions }) {
     list.innerHTML = renderFolderNodes(tree, 0) || `<p class="empty-state-copy">还没有文件夹</p>`;
     list.querySelectorAll("[data-folder]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (Date.now() - menuShownAt < 400) return;
         void (async () => {
           if (!(await ensureSaved())) return;
           selectedFolder = button.dataset.folder || "";
@@ -100,6 +99,7 @@ export function createReflectionsFeature({ state, actions }) {
           syncPreview();
         })();
       });
+      bindLongPressMenu(button, (x, y) => showFolderMenu(button.dataset.folder || "", x, y));
     });
     list.querySelectorAll("[data-expand]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -136,7 +136,7 @@ export function createReflectionsFeature({ state, actions }) {
         ${groups.map((group) => `
           <h3 class="reflections-group">${escHtml(group.label)}</h3>
           ${group.notes.map((note) => `
-            <button type="button" class="reflections-row ${note.path === currentPath ? "active" : ""}" data-path="${escHtml(note.path)}">
+            <button type="button" class="reflections-row ${note.path === currentPath ? "active" : ""}" data-path="${escHtml(note.path)}" title="右键或长按：重命名、移动、删除">
               <strong>${escHtml(note.title || note.name || "未命名")}</strong>
             </button>`).join("")}
         `).join("")}
@@ -166,6 +166,7 @@ export function createReflectionsFeature({ state, actions }) {
       </div>`;
     stage.querySelectorAll("[data-open-folder]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (Date.now() - menuShownAt < 400) return;
         void (async () => {
           if (!(await ensureSaved())) return;
           selectedFolder = button.dataset.openFolder || "";
@@ -174,9 +175,14 @@ export function createReflectionsFeature({ state, actions }) {
           renderStage();
         })();
       });
+      bindLongPressMenu(button, (x, y) => showFolderMenu(button.dataset.openFolder || "", x, y));
     });
     stage.querySelectorAll("[data-path]").forEach((button) => {
-      button.addEventListener("click", () => void openPath(button.dataset.path || ""));
+      button.addEventListener("click", () => {
+        if (Date.now() - menuShownAt < 400) return;
+        void openPath(button.dataset.path || "");
+      });
+      bindLongPressMenu(button, (x, y) => showNoteMenu(button.dataset.path || "", x, y));
     });
     const onEdit = () => {
       dirty = true;
@@ -384,6 +390,165 @@ export function createReflectionsFeature({ state, actions }) {
       scheduleAutosave();
     });
     host.addEventListener("blur", () => void flushAutosave());
+    host.addEventListener("keydown", (event) => {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      const block = attachmentBesideCaret(event.key === "Backspace" ? "back" : "forward");
+      if (!block) return;
+      event.preventDefault();
+      void removeAttachment(block, { confirm: false });
+    });
+  }
+
+  const ATTACHMENT_SELECTOR = ".note-audio, .reflection-image-piece";
+
+  function audioMarkerText({ id, src, name, transcript }) {
+    const parts = [`id=${id || ""}`, `src="${src || ""}"`];
+    const title = String(name || "").replace(/"/g, "").trim();
+    if (title) parts.push(`name="${title}"`);
+    return `:::aiclaw-audio[${parts.join(" ")}]\n${String(transcript || "").trim()}\n:::`;
+  }
+
+  function replaceAttachmentRaw(block, nextRaw) {
+    const hidden = document.getElementById("reflection-body");
+    const raw = block?._raw || "";
+    if (!hidden || !raw) return false;
+    const index = hidden.value.indexOf(raw);
+    if (index === -1) return false;
+    hidden.value = `${hidden.value.slice(0, index)}${nextRaw}${hidden.value.slice(index + raw.length)}`;
+    block._raw = nextRaw;
+    dirty = true;
+    saveStatus = "";
+    updateSaveStatus();
+    scheduleAutosave();
+    return true;
+  }
+
+  let openMenuEl = null;
+  let menuDismiss = null;
+  let menuShownAt = 0;
+
+  function closeMenu() {
+    openMenuEl?.remove();
+    openMenuEl = null;
+    if (menuDismiss) {
+      document.removeEventListener("pointerdown", menuDismiss, true);
+      menuDismiss = null;
+    }
+  }
+
+  function openAnchoredMenu(items, x, y, onPick) {
+    closeMenu();
+    menuShownAt = Date.now();
+    const menu = document.createElement("div");
+    menu.className = "note-attachment-menu";
+    menu.innerHTML = items
+      .map(([action, label]) => `<button type="button" data-action="${action}">${escHtml(label)}</button>`)
+      .join("");
+    document.body.append(menu);
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - box.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - box.height - 8))}px`;
+    openMenuEl = menu;
+    menu.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      closeMenu();
+      onPick(button.dataset.action);
+    });
+    menuDismiss = (event) => {
+      if (event.target.closest?.(".note-attachment-menu")) return;
+      closeMenu();
+    };
+    setTimeout(() => {
+      if (menuDismiss) document.addEventListener("pointerdown", menuDismiss, true);
+    }, 0);
+  }
+
+  function bindLongPressMenu(element, handler) {
+    let timer = null;
+    const cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    element.addEventListener("pointerdown", (event) => {
+      const innerButton = event.target.closest?.("button");
+      if (event.button !== 0 || (innerButton && innerButton !== element)) return;
+      const { clientX, clientY } = event;
+      cancel();
+      timer = setTimeout(() => {
+        timer = null;
+        // 长按后松手通常还会冒出一个 click，别让它顺带打开笔记/切换文件夹
+        const swallow = (clickEvent) => {
+          clickEvent.preventDefault();
+          clickEvent.stopPropagation();
+        };
+        element.addEventListener("click", swallow, true);
+        setTimeout(() => element.removeEventListener("click", swallow, true), 800);
+        handler(clientX, clientY);
+      }, 500);
+    });
+    element.addEventListener("pointerup", cancel);
+    element.addEventListener("pointerleave", cancel);
+    element.addEventListener("pointercancel", cancel);
+    element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      cancel();
+      handler(event.clientX, event.clientY);
+    });
+  }
+
+  function previousNode(node) {
+    if (node.previousSibling) {
+      let prev = node.previousSibling;
+      while (prev.lastChild) prev = prev.lastChild;
+      return prev;
+    }
+    return node.parentNode;
+  }
+
+  function nextNode(node) {
+    if (node.nextSibling) return node.nextSibling;
+    let parent = node.parentNode;
+    while (parent && !parent.nextSibling) parent = parent.parentNode;
+    return parent ? parent.nextSibling : null;
+  }
+
+  /** 光标紧挨着录音/图片块时（或整块被选中时），找出这一块，供退格删除。 */
+  function attachmentBesideCaret(direction) {
+    const host = document.getElementById("reflection-composed");
+    const selection = window.getSelection();
+    if (!host || !selection?.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!host.contains(range.startContainer)) return null;
+    const cardOf = (node) => {
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      return el?.closest?.(ATTACHMENT_SELECTOR) || null;
+    };
+    if (!range.collapsed) {
+      return cardOf(range.startContainer)
+        || cardOf(range.endContainer)
+        || [...host.querySelectorAll(ATTACHMENT_SELECTOR)].find((el) => range.intersectsNode(el))
+        || null;
+    }
+    if (range.startContainer.nodeType === Node.TEXT_NODE) {
+      const length = (range.startContainer.textContent || "").length;
+      if (direction === "back" && range.startOffset > 0) return null;
+      if (direction === "forward" && range.startOffset < length) return null;
+    }
+    let node = range.startContainer;
+    for (let step = 0; step < 80; step += 1) {
+      node = direction === "back" ? previousNode(node) : nextNode(node);
+      if (!node || !host.contains(node)) return null;
+      if (node.nodeType === Node.TEXT_NODE) {
+        if ((node.textContent || "").trim()) return null;
+        continue;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      if (cardOf(node)) return cardOf(node);
+      if (node.tagName === "BR") continue;
+      return null;
+    }
+    return null;
   }
 
   function splitReflectionPieces(body) {
@@ -400,6 +565,7 @@ export function createReflectionsFeature({ state, actions }) {
           raw: match[0],
           id: attrs.id || "",
           src: attrs.src || "",
+          name: attrs.name || "",
           transcript: String(match[2] || "").trim(),
         });
       } else {
@@ -429,7 +595,7 @@ export function createReflectionsFeature({ state, actions }) {
     return `${Math.floor(total / 60)}:${rest}`;
   }
 
-  function bindAudioCard(card, audio, id) {
+  function bindAudioCard(card, audio, block) {
     const play = card.querySelector(".note-audio-play");
     const back = card.querySelector(".note-audio-back");
     const forward = card.querySelector(".note-audio-forward");
@@ -466,7 +632,67 @@ export function createReflectionsFeature({ state, actions }) {
     };
     back?.addEventListener("click", () => seek(-15));
     forward?.addEventListener("click", () => seek(15));
-    card.querySelector(".note-audio-excerpt")?.addEventListener("dblclick", () => editAudioTranscript(id));
+    card.querySelector(".note-audio-excerpt")?.addEventListener("dblclick", () => editAudioTranscript(block));
+    bindLongPressMenu(card, (x, y) => showAttachmentMenu(block, x, y));
+  }
+
+  function showAttachmentMenu(block, x, y) {
+    const isAudio = block.classList.contains("note-audio");
+    const items = isAudio
+      ? [["rename", "重命名"], ["transcript", "编辑听写文本"], ["delete", "删除"]]
+      : [["delete", "删除"]];
+    openAnchoredMenu(items, x, y, (action) => {
+      if (action === "delete") void removeAttachment(block, { confirm: true });
+      else if (action === "rename") renameAttachment(block);
+      else if (action === "transcript") editAudioTranscript(block);
+    });
+  }
+
+  function audioAttrsOf(block) {
+    const match = /^:::aiclaw-audio\[([^\]]*)\]/.exec(block?._raw || "");
+    return parseAudioAttrs(match ? match[1] : "");
+  }
+
+  async function removeAttachment(block, { confirm } = {}) {
+    const isAudio = block.classList.contains("note-audio");
+    if (confirm && !window.confirm(isAudio ? "删除这条录音？" : "删除这张图片？")) return;
+    const hidden = document.getElementById("reflection-body");
+    const raw = block._raw || "";
+    if (!hidden || !raw) return;
+    const index = hidden.value.indexOf(raw);
+    if (index === -1) return;
+    const src = isAudio
+      ? audioAttrsOf(block).src || ""
+      : (/!\[[^\]]*\]\(([^)]+)\)/.exec(raw)?.[1] || "");
+    hidden.value = `${hidden.value.slice(0, index)}${hidden.value.slice(index + raw.length)}`;
+    block.remove();
+    dirty = true;
+    saveStatus = "";
+    updateSaveStatus();
+    await flushAutosave();
+    const notePath = draft?.path || currentPath;
+    if (src && notePath) {
+      const mediaPath = resolveMediaPath(notePath, src);
+      const { response, data } = await requestJson(
+        `/api/reflections/media?path=${encodeURIComponent(mediaPath)}`,
+        jsonRequest("DELETE"),
+      );
+      if (!response.ok && response.status !== 404) actions.showError?.(data.error || "附件删除失败");
+    }
+    scheduleMediaPreview();
+  }
+
+  function renameAttachment(block) {
+    const attrs = audioAttrsOf(block);
+    const next = window.prompt("录音名称", attrs.name || "录音");
+    if (next == null) return;
+    const nextRaw = audioMarkerText({
+      id: attrs.id,
+      src: attrs.src,
+      name: next,
+      transcript: block._transcript || "",
+    });
+    if (replaceAttachmentRaw(block, nextRaw)) scheduleMediaPreview();
   }
 
   async function renderMediaPreview() {
@@ -506,7 +732,7 @@ export function createReflectionsFeature({ state, actions }) {
       block.contentEditable = "false";
       block._raw = piece.raw;
       block.addEventListener("mousedown", (event) => {
-        if (event.target.closest("button")) return;
+        if (event.button !== 0 || event.target.closest("button")) return;
         event.preventDefault();
       });
       if (piece.kind === "image") {
@@ -523,15 +749,14 @@ export function createReflectionsFeature({ state, actions }) {
       }
       const when = audioRecordedLabel(piece.id);
       const excerpt = piece.transcript || "无";
+      const title = piece.name || "录音";
+      block._transcript = piece.transcript;
       block.innerHTML = `
-        <div class="note-audio-title">录音</div>
-        ${when ? `<div class="note-audio-time">${escHtml(when)}</div>` : ""}
-        <div class="note-audio-duration">--:--</div>
-        <hr>
-        <div class="note-audio-bottom">
-          <div>
-            <div class="note-audio-label">听写文本</div>
-            <div class="note-audio-excerpt">${escHtml(excerpt)}</div>
+        <div class="note-audio-head">
+          <div class="note-audio-heading">
+            <div class="note-audio-title">${escHtml(title)}</div>
+            ${when ? `<div class="note-audio-time">${escHtml(when)}</div>` : ""}
+            <div class="note-audio-duration">--:--</div>
           </div>
           <div class="note-audio-controls">
             <button type="button" class="note-audio-back" hidden aria-label="倒退15秒">15</button>
@@ -539,6 +764,9 @@ export function createReflectionsFeature({ state, actions }) {
             <button type="button" class="note-audio-forward" hidden aria-label="前进15秒">15</button>
           </div>
         </div>
+        <hr>
+        <div class="note-audio-label">听写文本</div>
+        <div class="note-audio-excerpt">${escHtml(excerpt)}</div>
         <audio preload="metadata"></audio>`;
       const audio = block.querySelector("audio");
       try {
@@ -546,7 +774,7 @@ export function createReflectionsFeature({ state, actions }) {
       } catch {
         block.querySelector(".note-audio-duration").textContent = "无法播放";
       }
-      bindAudioCard(block, audio, piece.id);
+      bindAudioCard(block, audio, block);
       host.append(block);
     }
     delete host.dataset.rendering;
@@ -578,38 +806,23 @@ export function createReflectionsFeature({ state, actions }) {
       </ul>`;
   }
 
-  function editAudioTranscript(audioId) {
-    const textarea = document.getElementById("reflection-body");
-    if (!textarea) return;
-    const body = textarea.value;
-    AUDIO_BLOCK_RE.lastIndex = 0;
-    let match;
-    let target = null;
-    while ((match = AUDIO_BLOCK_RE.exec(body))) {
-      const attrs = parseAudioAttrs(match[1]);
-      if (!audioId || attrs.id === audioId) {
-        target = match;
-        break;
-      }
-    }
-    if (!target) {
-      window.alert("找不到对应语音块。浏览器无法对已存录音自动重新识别，请直接改标记内草稿；云端精转见后续。");
-      return;
-    }
-    const current = String(target[2] || "").trim();
+  function editAudioTranscript(block) {
+    const attrs = audioAttrsOf(block);
     const next = window.prompt(
       "编辑转写草稿（系统无法对已存原声自动重转；改字即可。要新识别请再录一条。）",
-      current,
+      block._transcript || "",
     );
     if (next == null) return;
-    const attrs = parseAudioAttrs(target[1]);
-    const replacement = `:::aiclaw-audio[id=${attrs.id || audioId} src="${attrs.src || ""}"]\n${next.trim()}\n:::`;
-    textarea.value = `${body.slice(0, target.index)}${replacement}${body.slice(target.index + target[0].length)}`;
-    dirty = true;
-    saveStatus = "";
-    updateSaveStatus();
-    scheduleAutosave();
-    scheduleMediaPreview();
+    const nextRaw = audioMarkerText({
+      id: attrs.id,
+      src: attrs.src,
+      name: attrs.name,
+      transcript: next,
+    });
+    if (replaceAttachmentRaw(block, nextRaw)) {
+      block._transcript = next.trim();
+      scheduleMediaPreview();
+    }
   }
 
   function insertTextAtCaret(textarea, text) {
@@ -768,6 +981,163 @@ export function createReflectionsFeature({ state, actions }) {
     }
     const lines = orphans.map((item) => item.path).join("\n");
     window.alert(`发现 ${orphans.length} 个无对应笔记的附件目录（请与 md 一并拖移或手动清理）：\n${lines}`);
+  }
+
+  function showNoteMenu(notePath, x, y) {
+    openAnchoredMenu(
+      [["rename", "重命名"], ["move", "移动到…"], ["delete", "删除"]],
+      x,
+      y,
+      (action) => {
+        if (action === "rename") void renameNoteAt(notePath);
+        else if (action === "move") void moveNoteAt(notePath);
+        else if (action === "delete") void deleteNoteAt(notePath);
+      },
+    );
+  }
+
+  function showFolderMenu(folderPath, x, y) {
+    openAnchoredMenu(
+      [["rename", "重命名文件夹"], ["mkdir", "新建子文件夹"], ["delete", "删除文件夹"]],
+      x,
+      y,
+      (action) => {
+        if (action === "rename") void renameFolderAt(folderPath);
+        else if (action === "mkdir") void makeSubFolder(folderPath);
+        else if (action === "delete") void deleteFolderAt(folderPath);
+      },
+    );
+  }
+
+  async function renameNoteAt(notePath) {
+    await flushAutosave();
+    const { response, data } = await requestJson(`/api/reflections/content?path=${encodeURIComponent(notePath)}`);
+    if (!response.ok) {
+      actions.showError?.(data.error || "读取失败");
+      return;
+    }
+    const doc = data.reflection;
+    const current = doc?.title || "";
+    const next = window.prompt("重命名心得", current);
+    if (next == null) return;
+    const title = next.trim();
+    if (!title || title === current) return;
+    const put = await requestJson("/api/reflections/content", jsonRequest("PUT", {
+      path: notePath,
+      title,
+      body: doc?.body ?? "",
+    }));
+    if (!put.response.ok) {
+      actions.showError?.(put.data.error || "重命名失败");
+      return;
+    }
+    if (currentPath === notePath) {
+      currentPath = put.data.reflection?.path || currentPath;
+      draft = put.data.reflection || draft;
+      dirty = false;
+      saveStatus = "saved";
+    }
+    await loadTree();
+  }
+
+  async function moveNoteAt(notePath) {
+    const folder = window.prompt("移动到文件夹（相对 reflections，如 散步随想/大沙河）", folderKey(selectedFolder) || "inbox");
+    if (folder == null) return;
+    const { response, data } = await requestJson("/api/reflections/move", jsonRequest("POST", {
+      from: notePath,
+      toFolder: folder.trim() || "inbox",
+    }));
+    if (!response.ok) {
+      actions.showError?.(data.error || "移动失败");
+      return;
+    }
+    if (currentPath === notePath) {
+      currentPath = data.reflection?.path || "";
+      draft = data.reflection || null;
+      dirty = false;
+      saveStatus = "saved";
+    }
+    await loadTree();
+  }
+
+  async function deleteNoteAt(notePath) {
+    if (!window.confirm("删除这篇心得？")) return;
+    await flushAutosave();
+    const { response, data } = await requestJson(
+      `/api/reflections?path=${encodeURIComponent(notePath)}`,
+      jsonRequest("DELETE"),
+    );
+    if (!response.ok) {
+      actions.showError?.(data.error || "删除失败");
+      return;
+    }
+    if (currentPath === notePath) {
+      currentPath = "";
+      draft = null;
+      dirty = false;
+      saveStatus = "";
+    }
+    await loadTree();
+  }
+
+  async function renameFolderAt(folderPath) {
+    const current = folderPath.slice(folderPath.lastIndexOf("/") + 1);
+    const next = window.prompt("文件夹名称", current);
+    if (next == null) return;
+    const name = next.trim();
+    if (!name || name === current) return;
+    const { response, data } = await requestJson("/api/reflections/rename-folder", jsonRequest("POST", {
+      path: folderPath,
+      name,
+    }));
+    if (!response.ok) {
+      actions.showError?.(data.error || "重命名失败");
+      return;
+    }
+    const nextPath = data.path || folderPath;
+    const remap = (value) => (value === folderPath
+      ? nextPath
+      : value.startsWith(`${folderPath}/`) ? `${nextPath}${value.slice(folderPath.length)}` : value);
+    selectedFolder = remap(selectedFolder);
+    currentPath = remap(currentPath);
+    if (expanded.delete(folderPath)) expanded.add(nextPath);
+    await loadTree();
+  }
+
+  async function deleteFolderAt(folderPath) {
+    if (!window.confirm("删除这个文件夹，以及里面的全部心得和附件？")) return;
+    await flushAutosave();
+    const { response, data } = await requestJson(
+      `/api/reflections/folder?path=${encodeURIComponent(folderPath)}`,
+      jsonRequest("DELETE"),
+    );
+    if (!response.ok) {
+      actions.showError?.(data.error || "删除失败");
+      return;
+    }
+    if (selectedFolder === folderPath || selectedFolder.startsWith(`${folderPath}/`)) selectedFolder = "";
+    if (currentPath === folderPath || currentPath.startsWith(`${folderPath}/`)) {
+      currentPath = "";
+      draft = null;
+      dirty = false;
+      saveStatus = "";
+    }
+    await loadTree();
+  }
+
+  async function makeSubFolder(folderPath) {
+    const name = window.prompt("新建子文件夹");
+    if (!name?.trim()) return;
+    const { response, data } = await requestJson("/api/reflections/mkdir", jsonRequest("POST", {
+      folder: `${folderPath}/${name.trim()}`,
+    }));
+    if (!response.ok) {
+      actions.showError?.(data.error || "创建失败");
+      return;
+    }
+    expanded.add(folderPath);
+    if (data.path) selectedFolder = data.path;
+    await loadTree();
   }
 
   async function openPath(filePath) {

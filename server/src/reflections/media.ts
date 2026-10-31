@@ -173,6 +173,40 @@ export async function readReflectionMediaFile(
   }
 }
 
+/** 删除单个 sidecar 附件。正文仍在引用时拒绝，避免误删还在用的文件。 */
+export async function deleteReflectionMedia(mediaRelPath: string, userDataDir?: string): Promise<void> {
+  const { relativePath, absolutePath } = resolveReflectionPath(mediaRelPath, userDataDir);
+  const parts = relativePath.split("/");
+  const assetsIdx = parts.findIndex((part) => isAssetsDirName(part));
+  if (assetsIdx === -1 || assetsIdx >= parts.length - 1) {
+    throw new ReflectionsError("不是心得附件路径", 400);
+  }
+  const assetsRel = parts.slice(0, assetsIdx + 1).join("/");
+  const stem = path.posix.basename(assetsRel).slice(0, -ASSETS_SUFFIX.length);
+  const noteDir = path.posix.dirname(assetsRel);
+  const filename = path.posix.basename(relativePath);
+  for (const ext of [".md", ".txt"]) {
+    const noteRel = `${noteDir}/${stem}${ext}`;
+    try {
+      const raw = await readFile(resolveReflectionPath(noteRel, userDataDir).absolutePath, "utf-8");
+      if (raw.includes(filename)) {
+        throw new ReflectionsError("正文仍在引用该附件，请先删掉正文里的引用", 409);
+      }
+    } catch (error) {
+      if (error instanceof ReflectionsError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  try {
+    await rm(absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ReflectionsError("文件不存在或已被删除", 404);
+    }
+    throw error;
+  }
+}
+
 export async function moveAssetsPair(fromMdRel: string, toMdRel: string, userDataDir?: string): Promise<void> {
   const fromAssetsRel = assetsDirRelative(fromMdRel);
   const toAssetsRel = assetsDirRelative(toMdRel);

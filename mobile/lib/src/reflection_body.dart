@@ -5,6 +5,7 @@ class ReflectionPiece {
         raw = '',
         id = '',
         src = '',
+        name = '',
         transcript = '',
         alt = '';
 
@@ -13,6 +14,7 @@ class ReflectionPiece {
     required this.id,
     required this.src,
     required this.transcript,
+    this.name = '',
   })  : kind = 'audio',
         text = '',
         alt = '';
@@ -24,6 +26,7 @@ class ReflectionPiece {
   })  : kind = 'image',
         text = '',
         id = '',
+        name = '',
         transcript = '';
 
   final String kind;
@@ -31,8 +34,12 @@ class ReflectionPiece {
   final String raw;
   final String id;
   final String src;
+  final String name;
   final String transcript;
   final String alt;
+
+  /// 卡片标题：用户改过名就用名字，否则统一叫「录音」。
+  String get audioTitle => name.trim().isEmpty ? '录音' : name.trim();
 
   ReflectionPiece withText(String value) {
     return ReflectionPiece.text(value);
@@ -59,6 +66,7 @@ List<ReflectionPiece> splitReflectionBody(String body) {
         raw: raw,
         id: attrs['id'] ?? '',
         src: attrs['src'] ?? '',
+        name: attrs['name'] ?? '',
         transcript: (match.group(2) ?? '').trim(),
       ));
     } else {
@@ -97,6 +105,18 @@ Map<String, String> parseReflectionAttrs(String raw) {
     out[token.substring(0, eq).trim()] = value;
   }
   return out;
+}
+
+/// 重新拼一条语音标记。name 为空时不写属性，界面回落到「录音」。
+String formatAudioBlock({
+  required String id,
+  required String src,
+  String name = '',
+  String transcript = '',
+}) {
+  final title = name.replaceAll('"', '').trim();
+  final attrs = 'id=$id src="$src"${title.isEmpty ? '' : ' name="$title"'}';
+  return ':::aiclaw-audio[$attrs]\n${transcript.trim()}\n:::';
 }
 
 /// 标记 id 里的 UTC 时间，显示成本机本地时间。解析不了就返回空字符串。

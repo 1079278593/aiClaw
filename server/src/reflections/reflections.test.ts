@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BRAND_SLUG } from "../brand.js";
 import {
   assetsDirRelative,
+  deleteReflectionMedia,
   formatAudioMarker,
   listOrphanAssets,
   relativeMediaSrc,
@@ -15,6 +16,7 @@ import { parseOccurredLine, parseReflectionPaste } from "./parse.js";
 import {
   createReflection,
   deleteReflection,
+  deleteReflectionFolder,
   importReflections,
   listReflectionTree,
   listReflections,
@@ -22,6 +24,7 @@ import {
   moveReflection,
   organizeReflectionByDate,
   readReflection,
+  renameReflectionFolder,
   resolveReflectionPath,
   updateReflection,
 } from "./store.js";
@@ -269,6 +272,53 @@ describe("reflections store", () => {
       ':::aiclaw-audio[id=id1 src="./a.assets/x.m4a"]\n字\n:::',
     );
     expect(rewriteAssetsPrefixInBody("见 ./旧.assets/a.jpg", "旧", "新")).toBe("见 ./新.assets/a.jpg");
+  });
+
+  it("deletes one media file but refuses while the note still references it", async () => {
+    const dir = await setup();
+    const created = await createReflection({
+      title: "带录音",
+      body: "正文",
+      folder: "inbox",
+      userDataDir: dir,
+    });
+    const written = await writeReflectionMedia({
+      path: created.path,
+      data: Buffer.from("fake-audio"),
+      filename: "clip.m4a",
+      kind: "audio",
+      userDataDir: dir,
+    });
+    await updateReflection({ path: created.path, body: written.marker, userDataDir: dir });
+    await expect(deleteReflectionMedia(written.mediaPath, dir)).rejects.toThrow(/仍在引用/);
+
+    await updateReflection({ path: created.path, body: "正文", userDataDir: dir });
+    await deleteReflectionMedia(written.mediaPath, dir);
+    await expect(access(path.join(dir, written.mediaPath))).rejects.toBeTruthy();
+  });
+
+  it("renames and deletes folders with their notes inside", async () => {
+    const dir = await setup();
+    await mkdirReflection("主题A", dir);
+    const created = await createReflection({
+      title: "散步",
+      body: "正文",
+      folder: "主题A",
+      userDataDir: dir,
+    });
+
+    const renamed = await renameReflectionFolder({ path: "inputs/reflections/主题A", name: "主题B", userDataDir: dir });
+    expect(renamed.path).toBe("inputs/reflections/主题B");
+    const movedDoc = await readReflection("inputs/reflections/主题B/散步.md", dir);
+    expect(movedDoc.title).toBe("散步");
+
+    await expect(renameReflectionFolder({ path: "inputs/reflections", name: "x", userDataDir: dir })).rejects.toThrow(/根目录/);
+    await expect(deleteReflectionFolder("inputs/reflections", dir)).rejects.toThrow(/根目录/);
+
+    await deleteReflectionFolder("inputs/reflections/主题B", dir);
+    await expect(access(path.join(dir, "inputs", "reflections", "主题B"))).rejects.toBeTruthy();
+    expect(await listReflections({ userDataDir: dir })).toHaveLength(0);
+    expect(created.path).toBe("inputs/reflections/主题A/散步.md");
   });
 });
 

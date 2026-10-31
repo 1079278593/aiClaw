@@ -214,7 +214,7 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 ### 文内媒体（备忘录式内嵌）
 
-UX：录音和图片插在正文里。界面不展示 `:::aiclaw-audio` 原文。语音是占满一行的圆角卡片：标题「录音」、记录时间、时长、分割线、「听写文本」、最多两行转写，右侧一个播放按钮；点播放后变成倒退 15 秒、播放/暂停、前进 15 秒。原声必留；转写是可改草稿，失败不挡保存。
+UX：录音和图片插在正文里。界面不展示 `:::aiclaw-audio` 原文。语音是占满一行的圆角卡片：标题行左侧是标题「录音」（改名后显示新名字）、记录时间、时长，右侧是播放按钮；点播放后变成倒退 15 秒、播放/暂停、前进 15 秒。分割线下面是「听写文本」和最多两行转写。长按卡片出「重命名 / 编辑听写文本 / 删除」；网页端还支持右键和退格删除（光标紧挨卡片时）。原声必留；转写是可改草稿，失败不挡保存。
 
 存储（Obsidian 式 sidecar，不是苹果不透明库）：
 
@@ -244,6 +244,8 @@ inputs/reflections/<folder>/
 
 「拿去问」只带 md 正文（含转写草稿），P0 不把音频送给模型。与人物「可不留音频」策略分离。
 
+改名后的录音在标记里多一个可选属性 `name="…"`（没有就是「录音」）。`name` 只影响界面标题，不改 sidecar 文件名；`id` 与 `src` 是身份，改转写或改名都不能丢。删除一条录音要同时删标记和 sidecar 文件。
+
 | 接口 | 说明 |
 |---|---|
 | `GET /api/reflections?view=tree` | 目录树。文件节点带 `updatedAt`。心得首页用这个，不用扁平时间序。不含 `*.assets` |
@@ -255,10 +257,13 @@ inputs/reflections/<folder>/
 | `POST /api/reflections/parse` | 只解析记事本粘贴，不写盘 |
 | `POST /api/reflections/import` | `{ text?\|sourcePath?, folder?, dryRun?, deleteSource? }` 拆篇写入 |
 | `POST /api/reflections/mkdir` | `{ folder }` |
+| `POST /api/reflections/rename-folder` | `{ path, name }`，连同里面的笔记和附件一起改名 |
+| `DELETE /api/reflections/folder?path=` | 删除文件夹及其中全部笔记与附件 |
 | `POST /api/reflections/move` | `{ from, toFolder?\|toPath? }`；成对迁移 sidecar |
 | `POST /api/reflections/organize-by-date` | `{ path }` → 移到 `YYYY/MM/`；成对迁移 sidecar |
 | `POST /api/reflections/media` | `multipart/form-data`：`path`（篇 md）、`file`、可选 `kind=audio\|image`、`transcript`。写入 sidecar，返回 `{ id, relativeSrc, mediaPath, marker, kind }` |
 | `GET /api/reflections/media?path=` | 读取 sidecar 内文件（须在某个 `*.assets/` 下）。需 Bearer（鉴权开启时） |
+| `DELETE /api/reflections/media?path=` | 删除单个 sidecar 文件。正文仍引用同一文件名时返回 409，先删正文里的标记 |
 | `GET /api/reflections/assets?path=` | 本篇 sidecar 文件列表 `{ assets: [{ name, path, kind }] }`，`kind` 为 `audio` / `image` / `other` |
 | `GET /api/reflections/orphans` | 无对应 md/txt 的 `*.assets` 目录 `{ orphans: [{ path, stem, folder }] }` |
 

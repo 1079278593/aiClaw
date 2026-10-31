@@ -46,6 +46,82 @@ String _folderKey(String path) {
   return path;
 }
 
+class _NodeAction {
+  const _NodeAction(this.id, this.label, this.icon, {this.danger = false});
+
+  final String id;
+  final String label;
+  final IconData icon;
+  final bool danger;
+}
+
+Future<String?> _pickNodeAction(BuildContext context, List<_NodeAction> actions) {
+  return showModalBottomSheet<String>(
+    context: context,
+    builder: (context) {
+      final scheme = Theme.of(context).colorScheme;
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final action in actions)
+              ListTile(
+                leading: Icon(action.icon, color: action.danger ? scheme.error : null),
+                title: Text(
+                  action.label,
+                  style: action.danger ? TextStyle(color: scheme.error) : null,
+                ),
+                onTap: () => Navigator.pop(context, action.id),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<String?> _promptName(
+  BuildContext context,
+  String title, {
+  String label = '名称',
+  String initial = '',
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (context) => _NameDialog(title: title, label: label, initial: initial),
+  );
+}
+
+Future<bool> _confirmAction(BuildContext context, String title, String message) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(
+            '删除',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+      ],
+    ),
+  );
+  return result == true;
+}
+
+void _showError(BuildContext context, ApiException error) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(error.message)));
+}
+
 class ReflectionsListPage extends StatefulWidget {
   const ReflectionsListPage({super.key, required this.controller});
 
@@ -122,6 +198,49 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
     }
   }
 
+  Future<void> _folderMenu(_Node folder) async {
+    final action = await _pickNodeAction(context, const [
+      _NodeAction('rename', '重命名文件夹', Icons.drive_file_rename_outline),
+      _NodeAction('delete', '删除文件夹', Icons.delete_outline, danger: true),
+    ]);
+    if (action == null || !mounted) return;
+    if (action == 'rename') {
+      final name = await _promptName(context, '重命名文件夹', initial: folder.name);
+      if (name == null || name.isEmpty || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'POST',
+          apiUri(widget.controller.baseUrl, '/api/reflections/rename-folder'),
+          token: widget.controller.token,
+          body: {'path': folder.path, 'name': name},
+        );
+        await _load();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+      return;
+    }
+    if (action == 'delete') {
+      final ok = await _confirmAction(
+        context,
+        '删除文件夹',
+        '「${folder.name}」里的心得和附件会一起删掉。',
+      );
+      if (!ok || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'DELETE',
+          apiUri(widget.controller.baseUrl, '/api/reflections/folder', {'path': folder.path}),
+          token: widget.controller.token,
+        );
+        _expanded.removeWhere((path) => path == folder.path || path.startsWith('${folder.path}/'));
+        await _load();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+    }
+  }
+
   Future<void> _openFolder(_Node folder) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -174,6 +293,7 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
           leading: const Icon(Icons.folder_outlined),
           title: Text(folder.name),
           onTap: () => _openFolder(folder),
+          onLongPress: () => _folderMenu(folder),
           trailing: nested.isEmpty
               ? null
               : IconButton(
@@ -245,6 +365,218 @@ class _NotesPageState extends State<_NotesPage> {
     return null;
   }
 
+  Future<List<_Node>> _loadRoots() async {
+    final payload = await widget.controller.api.getJson(
+      apiUri(widget.controller.baseUrl, '/api/reflections', {'view': 'tree'}),
+      token: widget.controller.token,
+    );
+    final raw = payload['tree'];
+    return [
+      for (final item in raw is List ? raw : const [])
+        if (item is Map) _Node.fromJson(Map<String, Object?>.from(item)),
+    ];
+  }
+
+  String _noteTitle(_Node note) => note.title.isEmpty ? note.name : note.title;
+
+  Future<void> _noteMenu(_Node note) async {
+    final action = await _pickNodeAction(context, const [
+      _NodeAction('rename', '重命名', Icons.drive_file_rename_outline),
+      _NodeAction('move', '移动到…', Icons.drive_file_move_outline),
+      _NodeAction('delete', '删除', Icons.delete_outline, danger: true),
+    ]);
+    if (action == null || !mounted) return;
+    if (action == 'rename') await _renameNote(note);
+    if (action == 'move') await _moveNote(note);
+    if (action == 'delete') await _deleteNote(note);
+  }
+
+  Future<void> _renameNote(_Node note) async {
+    final next = await _promptName(
+      context,
+      '重命名心得',
+      label: '标题',
+      initial: _noteTitle(note),
+    );
+    if (next == null || next.isEmpty || !mounted) return;
+    try {
+      final payload = await widget.controller.api.getJson(
+        apiUri(widget.controller.baseUrl, '/api/reflections/content', {'path': note.path}),
+        token: widget.controller.token,
+      );
+      final doc = payload['reflection'];
+      final body = doc is Map ? '${doc['body'] ?? ''}' : '';
+      await widget.controller.api.sendJson(
+        'PUT',
+        apiUri(widget.controller.baseUrl, '/api/reflections/content'),
+        token: widget.controller.token,
+        body: {'path': note.path, 'title': next, 'body': body},
+      );
+      await _reload();
+    } on ApiException catch (error) {
+      if (mounted) _showError(context, error);
+    }
+  }
+
+  Future<void> _moveNote(_Node note) async {
+    List<_Node> roots;
+    try {
+      roots = await _loadRoots();
+    } on ApiException catch (error) {
+      if (mounted) _showError(context, error);
+      return;
+    }
+    final folders = <String>[];
+    void walk(List<_Node> nodes) {
+      for (final node in nodes) {
+        if (node.kind != 'directory') continue;
+        folders.add(node.path);
+        walk(node.children);
+      }
+    }
+    walk(roots);
+    if (!mounted) return;
+    if (folders.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('还没有别的文件夹')));
+      return;
+    }
+    final target = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(dense: true, title: Text('移动到')),
+            for (final folder in folders)
+              ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(_folderKey(folder).isEmpty ? '/' : _folderKey(folder)),
+                onTap: () => Navigator.pop(context, folder),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    try {
+      await widget.controller.api.sendJson(
+        'POST',
+        apiUri(widget.controller.baseUrl, '/api/reflections/move'),
+        token: widget.controller.token,
+        body: {'from': note.path, 'toFolder': target},
+      );
+      await _reload();
+    } on ApiException catch (error) {
+      if (mounted) _showError(context, error);
+    }
+  }
+
+  Future<void> _deleteNote(_Node note) async {
+    final ok = await _confirmAction(
+      context,
+      '删除心得',
+      '「${_noteTitle(note)}」和它的附件会一起删掉。',
+    );
+    if (!ok || !mounted) return;
+    try {
+      await widget.controller.api.sendJson(
+        'DELETE',
+        apiUri(widget.controller.baseUrl, '/api/reflections', {'path': note.path}),
+        token: widget.controller.token,
+      );
+      await _reload();
+    } on ApiException catch (error) {
+      if (mounted) _showError(context, error);
+    }
+  }
+
+  Future<void> _childFolderMenu(_Node folder) async {
+    final action = await _pickNodeAction(context, const [
+      _NodeAction('rename', '重命名文件夹', Icons.drive_file_rename_outline),
+      _NodeAction('delete', '删除文件夹', Icons.delete_outline, danger: true),
+    ]);
+    if (action == null || !mounted) return;
+    if (action == 'rename') {
+      final name = await _promptName(context, '重命名文件夹', initial: folder.name);
+      if (name == null || name.isEmpty || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'POST',
+          apiUri(widget.controller.baseUrl, '/api/reflections/rename-folder'),
+          token: widget.controller.token,
+          body: {'path': folder.path, 'name': name},
+        );
+        await _reload();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+      return;
+    }
+    if (action == 'delete') {
+      final ok = await _confirmAction(
+        context,
+        '删除文件夹',
+        '「${folder.name}」里的心得和附件会一起删掉。',
+      );
+      if (!ok || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'DELETE',
+          apiUri(widget.controller.baseUrl, '/api/reflections/folder', {'path': folder.path}),
+          token: widget.controller.token,
+        );
+        await _reload();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+    }
+  }
+
+  Future<void> _currentFolderMenu() async {
+    final action = await _pickNodeAction(context, const [
+      _NodeAction('rename', '重命名文件夹', Icons.drive_file_rename_outline),
+      _NodeAction('delete', '删除文件夹', Icons.delete_outline, danger: true),
+    ]);
+    if (action == null || !mounted) return;
+    if (action == 'rename') {
+      final name = await _promptName(context, '重命名文件夹', initial: _folder.name);
+      if (name == null || name.isEmpty || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'POST',
+          apiUri(widget.controller.baseUrl, '/api/reflections/rename-folder'),
+          token: widget.controller.token,
+          body: {'path': _folder.path, 'name': name},
+        );
+        await widget.reloadTree();
+        if (mounted) Navigator.of(context).pop();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+      return;
+    }
+    if (action == 'delete') {
+      final ok = await _confirmAction(
+        context,
+        '删除文件夹',
+        '「${_folder.name}」里的心得和附件会一起删掉。',
+      );
+      if (!ok || !mounted) return;
+      try {
+        await widget.controller.api.sendJson(
+          'DELETE',
+          apiUri(widget.controller.baseUrl, '/api/reflections/folder', {'path': _folder.path}),
+          token: widget.controller.token,
+        );
+        await widget.reloadTree();
+        if (mounted) Navigator.of(context).pop();
+      } on ApiException catch (error) {
+        if (mounted) _showError(context, error);
+      }
+    }
+  }
+
   Future<void> _publish() async {
     if (_busy || _draft.text.trim().isEmpty) return;
     final title = await showDialog<String>(
@@ -305,6 +637,11 @@ class _NotesPageState extends State<_NotesPage> {
         title: Text(_folder.name),
         actions: [
           IconButton(
+            onPressed: _currentFolderMenu,
+            tooltip: '文件夹操作',
+            icon: const Icon(Icons.more_horiz),
+          ),
+          IconButton(
             onPressed: _create,
             tooltip: '创建',
             icon: const Icon(Icons.note_add_outlined),
@@ -334,12 +671,13 @@ class _NotesPageState extends State<_NotesPage> {
                       );
                       await _reload();
                     },
+                    onLongPress: () => _childFolderMenu(folder),
                   ),
                 for (final label in labels) ...[
                   ListTile(dense: true, title: Text(label)),
                   for (final note in groups[label]!)
                     ListTile(
-                      title: Text(note.title.isEmpty ? note.name : note.title),
+                      title: Text(_noteTitle(note)),
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute<void>(
@@ -352,6 +690,7 @@ class _NotesPageState extends State<_NotesPage> {
                         );
                         await _reload();
                       },
+                      onLongPress: () => _noteMenu(note),
                     ),
                 ],
               ],
@@ -391,17 +730,19 @@ class _NotesPageState extends State<_NotesPage> {
 }
 
 class _NameDialog extends StatefulWidget {
-  const _NameDialog({required this.title, required this.label});
+  const _NameDialog({required this.title, required this.label, this.initial = ''});
 
   final String title;
   final String label;
+  final String initial;
 
   @override
   State<_NameDialog> createState() => _NameDialogState();
 }
 
 class _NameDialogState extends State<_NameDialog> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
 
   @override
   void dispose() {

@@ -219,6 +219,15 @@ function sanitizeFilename(title: string): string {
   return cleaned || "未命名心得";
 }
 
+function sanitizeFolderName(name: string): string {
+  return String(name || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 80)
+    .trim();
+}
+
 async function uniqueMdPath(
   absoluteFolder: string,
   relativeFolder: string,
@@ -428,6 +437,57 @@ export async function mkdirReflection(folder: string, userDataDir?: string): Pro
   const { relativeFolder, absoluteFolder } = resolveFolder(folder, userDataDir);
   await mkdir(absoluteFolder, { recursive: true });
   return { path: relativeFolder };
+}
+
+async function assertRealFolder(folderPath: string, userDataDir?: string): Promise<{ relativePath: string; absolutePath: string }> {
+  const resolved = resolveReflectionPath(folderPath, userDataDir);
+  if (resolved.relativePath === ROOT_REL) {
+    throw new ReflectionsError("不能操作心得根目录", 400);
+  }
+  if (isAssetsDirName(path.basename(resolved.absolutePath))) {
+    throw new ReflectionsError("不能操作附件目录", 400);
+  }
+  let st;
+  try {
+    st = await stat(resolved.absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ReflectionsError("文件夹不存在或已被删除", 404);
+    }
+    throw error;
+  }
+  if (!st.isDirectory()) throw new ReflectionsError("不是文件夹", 400);
+  return resolved;
+}
+
+/** 文件夹改名（连同里面的笔记与附件一起移动，正文里的相对引用不变）。 */
+export async function renameReflectionFolder(input: {
+  path: string;
+  name?: string;
+  userDataDir?: string;
+}): Promise<{ path: string }> {
+  const { relativePath, absolutePath } = await assertRealFolder(input.path, input.userDataDir);
+  const name = sanitizeFolderName(input.name || "");
+  if (!name) throw new ReflectionsError("文件夹名不能为空", 400);
+  const parentRel = path.posix.dirname(relativePath);
+  const destRel = normalizeRel(`${parentRel}/${name}`);
+  const { absolutePath: destAbs } = resolveReflectionPath(destRel, input.userDataDir);
+  if (destAbs === absolutePath) return { path: relativePath };
+  try {
+    await stat(destAbs);
+    throw new ReflectionsError("已存在同名文件夹", 409);
+  } catch (error) {
+    if (error instanceof ReflectionsError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await rename(absolutePath, destAbs);
+  return { path: destRel };
+}
+
+/** 删除文件夹及其中的全部笔记与附件。 */
+export async function deleteReflectionFolder(folderPath: string, userDataDir?: string): Promise<void> {
+  const { absolutePath } = await assertRealFolder(folderPath, userDataDir);
+  await rm(absolutePath, { recursive: true, force: true });
 }
 
 export async function moveReflection(input: {

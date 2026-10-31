@@ -1047,6 +1047,15 @@ body.reflections-workspace #doc-preview-content {
   color: var(--text1, inherit);
   user-select: none;
 }
+.note-audio-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.note-audio-heading {
+  flex: 1;
+  min-width: 0;
+}
 .note-audio-title {
   font-size: 17px;
   font-weight: 650;
@@ -1059,29 +1068,21 @@ body.reflections-workspace #doc-preview-content {
 }
 .note-audio hr {
   border: 0;
-  border-top: 1px solid var(--line, #ddd);
+  border-top: 1px solid var(--border, #ddd);
   margin: 8px 0;
-}
-.note-audio-bottom {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-.note-audio-bottom > div:first-child {
-  flex: 1;
-  min-width: 0;
 }
 .note-audio-excerpt {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  color: var(--text, inherit);
+  color: var(--text1, inherit);
   font-size: 15px;
 }
 .note-audio-controls {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 .note-audio-controls button {
   width: 36px;
@@ -1091,6 +1092,36 @@ body.reflections-workspace #doc-preview-content {
   background: transparent;
   cursor: pointer;
   font: inherit;
+}
+.note-audio-controls button:hover {
+  background: var(--bg2, #e4decb);
+}
+.note-attachment-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 148px;
+  padding: 6px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+  background: var(--bg3, #fff);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.note-attachment-menu button {
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text1, inherit);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.note-attachment-menu button:hover {
+  background: var(--bg2, #eee);
 }
 .note-audio audio,
 .reflection-image-piece audio {
