@@ -34,7 +34,12 @@ export function createAppState() {
     compactingBubble: null,
     pendingImages: [],
     disconnectNotified: false,
-    workspace: "docs",
+    /**
+     * 左侧面板：docs | people | reflections。
+     * 只决定左栏显示哪个列表、以及发消息时附带哪类上下文，
+     * 与会话无关（切面板不换会话，也不持久化）。
+     */
+    panel: "docs",
     personThread: null,
     reflectionPreview: null,
     afterChat: null,

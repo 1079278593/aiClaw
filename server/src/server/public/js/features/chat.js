@@ -52,7 +52,7 @@ export function createChatFeature({
     const content = state.inputEl.value.trim();
     if ((!content && !state.pendingImages.length) || !state.currentSessionId) return;
     const images = state.pendingImages.map((image) => ({ url: image.url, path: image.path }));
-    const person = state.workspace === "people" ? state.personThread : null;
+    const person = state.panel === "people" ? state.personThread : null;
     const captureJob = person?.captureJob;
     if (person) person.captureJob = undefined;
     // 乐观气泡与后端 payload 共用同一份引用上下文（人物 / 心得 / 文档）
@@ -61,7 +61,7 @@ export function createChatFeature({
           ...(person.previewPath ? { previewPath: person.previewPath } : {}),
           ...(person.selectedText ? { selectedPreviewText: person.selectedText } : {}),
         }
-      : state.workspace === "reflections" && state.reflectionPreview?.previewPath
+      : state.panel === "reflections" && state.reflectionPreview?.previewPath
         ? { previewPath: state.reflectionPreview.previewPath }
         : documents.getPreviewContextPayload();
     setSendDisabled(true);
@@ -91,7 +91,7 @@ export function createChatFeature({
       thinkingEffort: state.currentThinkingEffort,
       ...(person
         ? {
-            threadPath: `inputs/people/${person.id}`,
+            threadPath: `people/${person.id}`,
             ...(captureJob ? { captureJob } : {}),
             ...previewContext,
           }
@@ -214,17 +214,25 @@ export function createChatFeature({
     return `${(number / 10000).toFixed(1)}W`;
   }
 
-  function updateTokenDisplay(usage) {
+  function updateTokenDisplay(usage, budget) {
     if (!state.tokenDisplayEl) return;
     if (!usage) {
       state.tokenDisplayEl.textContent = "";
       state.tokenDisplayEl.style.display = "none";
+      state.tokenDisplayEl.removeAttribute("title");
       return;
     }
     const input = usage.inputTokens || 0;
     const output = usage.billingOutputTokens ?? usage.outputTokens ?? 0;
     state.tokenDisplayEl.textContent = formatContextTokens(input + output);
     state.tokenDisplayEl.style.display = "inline-flex";
+    // 预算报表是「飞行前估算」，与上面按真实 usage 的数字是两回事：放在 title 里对照。
+    if (budget && Number.isFinite(budget.ratio)) {
+      const estimated = Math.round(budget.total ?? 0);
+      state.tokenDisplayEl.title = `估算占窗口 ${(budget.ratio * 100).toFixed(0)}%（${estimated} / ${budget.available ?? budget.window ?? 0}）`;
+    } else {
+      state.tokenDisplayEl.removeAttribute("title");
+    }
   }
 
   function syncCompactButton() {
@@ -479,7 +487,7 @@ export function createChatFeature({
     state.typingPlaceholder = null;
     permissions.clearForSession(message.sessionId);
     if (message.contextUsage || message.usage) state.latestUsage = message.contextUsage || message.usage;
-    updateTokenDisplay(state.latestUsage);
+    updateTokenDisplay(state.latestUsage, message.budget);
     // 用真实 outputTokens 显示精确平均速率，停留几秒后隐藏
     const speedFinal = message.tokenSpeed;
     if (speedFinal?.outputTokens > 0 && speedFinal.elapsedMs > 0) {
@@ -579,10 +587,21 @@ export function createChatFeature({
     cached.currentMessages = state.currentMessages;
   }
 
+  /**
+   * 心得面板的「对话」入口（plan §10.1）：右栏 `#chat-panel` 全局只有一个，
+   * 切面板不换会话——入口只负责把焦点送到输入框，并提示当前上下文已带上所选心得。
+   */
+  function focusChat() {
+    document.getElementById("chat-panel")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    actions.setChatHomeVisible?.(false);
+    state.inputEl?.focus();
+  }
+
   return {
     bindGlobalEvents,
     compactCurrentSession,
     bindScrollListener,
+    focusChat,
     handleServerMessage,
     replaySessionEvents,
     restartFromMessage,

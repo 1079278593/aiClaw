@@ -7,6 +7,7 @@
  */
 
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { Message, MessageContentPart, Session } from "../types/index.js";
 import { logger } from "../logger/index.js";
 import { loadSession, addMessage, generateId, saveSession } from "../session/index.js";
@@ -23,6 +24,16 @@ import type { NormalizedUsage, UsageRecord } from "../llm/types.js";
 import { calcCost } from "../llm/cost.js";
 import { TokenSpeedTracker } from "./speed.js";
 import type { TokenSpeedSnapshot } from "./speed.js";
+import {
+  assembleContextBudget,
+  estimateTokens as estimateTokensAccurate,
+  getCalibrationFactor,
+  type ContextBudgetReport,
+  type SystemBlock,
+} from "./context-budget.js";
+import { buildMemoryInjection } from "../memory/inject.js";
+import { buildDistillMapInjection } from "../distill/inject.js";
+import { markInjected } from "../memory/store.js";
 
 export interface ChatOptions {
   stream?: boolean;
@@ -55,6 +66,8 @@ export interface ChatResult {
   assistantMessage: Message;
   usage?: UsageRecord;
   contextUsage?: UsageRecord;
+  /** 飞行前的预算报表：确定值，供界面显示「估算 x%」。 */
+  budget?: ContextBudgetReport;
 }
 
 function mergeUsage(current: NormalizedUsage | null, incoming?: NormalizedUsage | null): NormalizedUsage | null {
@@ -74,8 +87,8 @@ function mergeUsage(current: NormalizedUsage | null, incoming?: NormalizedUsage 
 }
 
 function estimateTokens(text: string): number {
-  if (!text) return 0;
-  return Math.ceil(text.length / 3);
+  // 旧的 len / 3 对中文低估约 3 倍；统一走 context-budget 的估算式。
+  return estimateTokensAccurate(text);
 }
 
 function extractTextContent(content: Message["content"]): string {
@@ -114,22 +127,206 @@ function formatToday(): string {
   return `${y}/${m}/${day}`;
 }
 
-async function loadSystemPrompt(config: Config): Promise<string | null> {
+/**
+ * 单一来源的系统提示词（plan §8.1）：
+ *
+ *   agents/main/AGENT.md 存在 → 用它
+ *   否则 → 退回 files/prompts/agent_system_prompt.txt（旧装兼容）
+ *
+ * 这两个路径都在 ACL 的 `denied` 内，但那只是 **Agent 工具** 的禁域；
+ * 系统内部加载提示词不受 ACL 约束（不得改成「不可读」）。
+ */
+export async function loadSystemPrompt(config: Config): Promise<string | null> {
   void config;
-  const resolved = getPaths().agentSystemPromptFile;
+  const paths = getPaths();
   let content: string | null = null;
-  try {
-    content = (await fs.readFile(resolved, "utf-8")).trim() || null;
-  } catch {
-    logger.debug(`System prompt file not found: ${resolved}`);
+  for (const candidate of [paths.agentConstitutionFile, paths.agentSystemPromptFile]) {
+    try {
+      content = (await fs.readFile(candidate, "utf-8")).trim() || null;
+    } catch {
+      logger.debug(`System prompt file not found: ${candidate}`);
+      continue;
+    }
+    if (content) {
+      logger.debug(`System prompt loaded from: ${candidate}`);
+      break;
+    }
   }
   // 实时附加当前日期，让 agent 知道"今天"
   const dateLine = `今天的日期是${formatToday()}`;
   return content ? `${content}\n\n${dateLine}` : dateLine;
 }
 
-function resolveChatRunSettings(config: Config, options: ChatOptions): ChatRunSettings {
-  const providerName = options.provider ?? config.defaultProvider;
+/**
+ * 把系统提示词切成分区，交给预算装配按可变性排序。
+ *
+ * `policy` 是固定策略与身份；`rootIndex` 是可选的根索引加速块（plan §5.7），
+ * 只有 `injectRootIndex` 打开且内容不超上限时才进预算，默认关闭。
+ */
+export function buildSystemBlocks(
+  systemPrompt: string | null,
+  rootIndex?: string | null,
+  memoryText?: string | null,
+  distillMap?: string | null,
+): SystemBlock[] {
+  const blocks: SystemBlock[] = [];
+  if (rootIndex?.trim()) {
+    blocks.push({ name: "rootIndex", text: rootIndex, max: ROOT_INDEX_TOKEN_MAX });
+  }
+  // 记忆块（plan §8.3）：可变性高于策略、低于索引尾；预算不足时它先于 policy 被丢。
+  if (memoryText?.trim()) {
+    blocks.push({ name: "user", text: memoryText, max: MEMORY_TOKEN_MAX });
+  }
+  // 蒸馏地图（plan_distill §4）：加速层，优先级低于记忆、高于 policy。
+  // 预算不足时先丢它——丢了只影响效率，policy 丢了影响行为安全。
+  if (distillMap?.trim()) {
+    blocks.push({ name: "distillMap", text: distillMap, max: DISTILL_MAP_TOKEN_MAX });
+  }
+  if (systemPrompt?.trim()) {
+    blocks.push({ name: "policy", text: systemPrompt, max: POLICY_TOKEN_MAX });
+  }
+  return blocks;
+}
+
+/** 策略块上限：固定策略本身不应无限膨胀，超了说明该拆分了。 */
+export const POLICY_TOKEN_MAX = 6000;
+
+/**
+ * 根索引块的 token 上限（plan §6.5 报表里 `max: 1000`）。
+ * 超限时整块丢弃而不是截断——半张地图会误导路由。
+ */
+export const ROOT_INDEX_TOKEN_MAX = 1000;
+
+/** 根索引的字节上限：1 KB，与 §5.7 的约定一致（中文约 300 token 量级）。 */
+export const ROOT_INDEX_BYTE_MAX = 1024;
+
+/**
+ * 蒸馏地图的 token 上限（plan_distill §2.2 / §4）。
+ * 地图文件本身限 2 KB，这里按 token 再卡一道，防止中英混排时估算偏差。
+ */
+export const DISTILL_MAP_TOKEN_MAX = 1200;
+
+/**
+ * 记忆块 token 上限（plan §6.5 报表里 `user` 是 1500）。
+ * 8 条记忆 × 每条约 150 token，留够余量；超限时整块丢弃而不是截断成半条。
+ */
+export const MEMORY_TOKEN_MAX = 1500;
+
+/**
+ * 读取根索引供注入。任何失败都退回「不注入」，不影响本轮对话：
+ * 缺文件、读失败、超 1 KB 都只记日志。
+ */
+export async function loadRootIndexForInjection(enabled: boolean): Promise<string | null> {
+  if (!enabled) return null;
+  const file = path.join(getPaths().reflections, "_index.md");
+  try {
+    const content = (await fs.readFile(file, "utf-8")).trim();
+    if (!content) return null;
+    if (Buffer.byteLength(content, "utf-8") > ROOT_INDEX_BYTE_MAX) {
+      logger.info("rootIndexSkipped: too large", { file, bytes: Buffer.byteLength(content, "utf-8") });
+      return null;
+    }
+    return `# 心得根索引（${file}）\n\n${content}`;
+  } catch {
+    logger.debug(`root index not injected: ${file}`);
+    return null;
+  }
+}
+
+/**
+ * 蒸馏地图注入（plan_distill §4）。
+ *
+ * 与根索引同样的三条约束：默认关闭、超限整块丢弃、失败静默。
+ * 额外一条：它与记忆共用 `MEMORY_TOKEN_MAX` 预算，且地图先让路。
+ */
+export async function loadDistillMapForInjection(
+  config: Config,
+  memoryText?: string | null,
+): Promise<string | null> {
+  if (!config.injectDistillMap) return null;
+  const injection = await buildDistillMapInjection({
+    enabled: true,
+    memoryTokensUsed: memoryText ? Math.ceil(memoryText.length / 1.5) : 0,
+    budget: MEMORY_TOKEN_MAX,
+  }).catch(() => ({ text: "", skipped: "empty" as const, bytes: 0 }));
+  if (!injection.text) {
+    logger.debug(`distill map not injected: ${injection.skipped ?? "empty"}`);
+    return null;
+  }
+  return `# 蒸馏地图（可用摘要）\n\n${injection.text}`;
+}
+
+type BudgetBuildInput = {
+  config: Config;
+  run: ChatRunSettings;
+  systemPrompt: string | null;
+  rootIndex?: string | null;
+  /** 记忆块（plan §8.3）。为空则不注入，也不占块位。 */
+  memoryText?: string | null;
+  /** 蒸馏地图（plan_distill §4）。为空则不注入。 */
+  distillMap?: string | null;
+  history: Message[];
+  userMessage: Message;
+  maxTokens: number;
+};
+
+/**
+ * 统一的上下文装配入口。
+ *
+ * `contextMaxMessages` 仍然生效（它是用户显式配置的硬约束），但裁剪单位改为 turn，
+ * 避免按单条裁出孤儿 tool 消息。
+ */
+function buildBudgetMessages(input: BudgetBuildInput): { messages: Message[]; report: ContextBudgetReport } {
+  const modelConfig = input.config.providers[input.run.providerName]?.models?.find((item) => item.id === input.run.model);
+  const history = input.config.contextMaxMessages > 0
+    ? limitHistoryByMessages(input.history, input.config.contextMaxMessages)
+    : input.history;
+
+  return assembleContextBudget({
+    userMessage: input.userMessage,
+    history,
+    systemBlocks: buildSystemBlocks(input.systemPrompt, input.rootIndex, input.memoryText, input.distillMap),
+    contextMaxTokens: input.config.contextMaxTokens,
+    modelContextWindow: modelConfig?.contextWindow,
+    maxTokens: input.maxTokens,
+    calibrationFactor: getCalibrationFactor(input.run.providerName, input.run.model),
+  });
+}
+
+/** 按消息条数上限裁历史：以 turn 为单位从新到旧保留，绝不切出孤儿 tool。 */
+function limitHistoryByMessages(history: Message[], maxMessages: number): Message[] {
+  const turns = groupByTurnSafe(history);
+  const kept: Message[] = [];
+  let count = 0;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    if (count + turns[i].length > maxMessages) break;
+    kept.unshift(...turns[i]);
+    count += turns[i].length;
+  }
+  return kept;
+}
+
+/** 与 context-budget 的分组规则一致；这里单独引入避免循环依赖。 */
+function groupByTurnSafe(history: Message[]): Message[][] {
+  const turns: Message[][] = [];
+  let current: Message[] = [];
+  for (const message of history) {
+    if (message.role === "user") {
+      if (current.length > 0) turns.push(current);
+      current = [message];
+      continue;
+    }
+    current.push(message);
+    if (message.role === "assistant" && !message.tool_calls?.length) {
+      turns.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) turns.push(current);
+  return turns;
+}
+
+function resolveChatRunSettings(config: Config, options: ChatOptions): ChatRunSettings {  const providerName = options.provider ?? config.defaultProvider;
   const fallbackModel = config.providers[providerName]?.models?.[0]?.id ?? config.defaultModel;
   const model = options.model ?? (providerName === config.defaultProvider ? config.defaultModel : fallbackModel);
   const credential = getProviderCredential(config, providerName);
@@ -582,6 +779,20 @@ export async function* runAgenticLoopStreaming(
   };
 }
 
+/**
+ * 记忆注入的统一入口：读 → 选 → 中和 → 返回。
+ * 失败一律退化为「不注入」，绝不影响本轮对话。
+ */
+export async function prepareMemory(query: string): Promise<{ text: string; ids: string[] }> {
+  try {
+    const injection = await buildMemoryInjection(query);
+    return { text: injection.text, ids: injection.ids };
+  } catch (error) {
+    logger.warn(`memory injection skipped: ${(error as Error).message}`);
+    return { text: "", ids: [] };
+  }
+}
+
 export async function chat(
   sessionId: string,
   userContent: string | MessageContentPart[],
@@ -606,14 +817,26 @@ export async function chat(
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
 
   const systemPromptContent = await loadSystemPrompt(config);
-  const systemMessages: Message[] = systemPromptContent
-    ? [{ id: "system", role: "system", content: systemPromptContent, timestamp: new Date().toISOString() }]
-    : [];
-  const messagesForContext = truncateMessagesForContext(
-    [...systemMessages, ...historyForProvider, llmUserMessage],
-    config.contextMaxTokens,
-    config.contextMaxMessages,
+  const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
+  const memory = await prepareMemory(extractTextContent(llmUserMessage.content));
+  const distillMap = await loadDistillMapForInjection(config, memory.text);
+  const budget = buildBudgetMessages({
+    config,
+    run,
+    systemPrompt: systemPromptContent,
+    rootIndex,
+    memoryText: memory.text,
+    distillMap,
+    history: historyForProvider,
+    userMessage: llmUserMessage,
+    maxTokens,
+  });
+  const messagesForContext = budget.messages;
+  // 只有记忆块真的留在预算里，才给 `used` 自增（plan §8.2）。
+  const memoryKept = budget.report.blocks.some(
+    (block) => block.name === "user" && block.tokens > 0,
   );
+  if (memoryKept) await markInjected(memory.ids).catch(() => undefined);
 
   logger.debug("Sending chat to LLM", { sessionId, messageCount: messagesForContext.length });
   const provider = createProvider(run.providerName);
@@ -686,7 +909,7 @@ export async function chat(
     config.providers[run.providerName]?.models.find((m) => m.id === run.model)?.cost);
 
   logger.info("Chat completed", { sessionId });
-  return { sessionId, userMessage, assistantMessage, usage, contextUsage: contextUsageRecord };
+  return { sessionId, userMessage, assistantMessage, usage, contextUsage: contextUsageRecord, budget: budget.report };
 }
 
 export async function* chatStream(
@@ -702,6 +925,7 @@ export async function* chatStream(
   usage?: UsageRecord;
   contextUsage?: UsageRecord;
   tokenSpeed?: TokenSpeedSnapshot;
+  budget?: ContextBudgetReport;
 }, ChatResult, unknown> {
   const maxTokens = options.maxTokens ?? config.maxTokens;
   const persistedUserContent = options.persistedUserContent ?? userContent;
@@ -721,14 +945,26 @@ export async function* chatStream(
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
 
   const systemPromptContent = await loadSystemPrompt(config);
-  const systemMessages: Message[] = systemPromptContent
-    ? [{ id: "system", role: "system", content: systemPromptContent, timestamp: new Date().toISOString() }]
-    : [];
-  const messagesForContext = truncateMessagesForContext(
-    [...systemMessages, ...historyForProvider, llmUserMessage],
-    config.contextMaxTokens,
-    config.contextMaxMessages,
+  const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
+  const memory = await prepareMemory(extractTextContent(llmUserMessage.content));
+  const distillMap = await loadDistillMapForInjection(config, memory.text);
+  const budget = buildBudgetMessages({
+    config,
+    run,
+    systemPrompt: systemPromptContent,
+    rootIndex,
+    memoryText: memory.text,
+    distillMap,
+    history: historyForProvider,
+    userMessage: llmUserMessage,
+    maxTokens,
+  });
+  const messagesForContext = budget.messages;
+  // 只有记忆块真的留在预算里，才给 `used` 自增（plan §8.2）。
+  const memoryKept = budget.report.blocks.some(
+    (block) => block.name === "user" && block.tokens > 0,
   );
+  if (memoryKept) await markInjected(memory.ids).catch(() => undefined);
 
   logger.debug("Sending streaming chat to LLM", { sessionId, messageCount: messagesForContext.length });
   await addMessage(sessionId, userMessage);
@@ -827,8 +1063,8 @@ export async function* chatStream(
     config.providers[run.providerName]?.models.find((m) => m.id === run.model)?.cost);
 
   logger.debug("Chat completed", { session: session.title });
-  yield { chunk: "", done: true, usage: usageRecord, contextUsage: contextUsageRecord, tokenSpeed: speedFinal };
-  return { sessionId, userMessage, assistantMessage, usage: usageRecord, contextUsage: contextUsageRecord };
+  yield { chunk: "", done: true, usage: usageRecord, contextUsage: contextUsageRecord, tokenSpeed: speedFinal, budget: budget.report };
+  return { sessionId, userMessage, assistantMessage, usage: usageRecord, contextUsage: contextUsageRecord, budget: budget.report };
 }
 
 export function getChatContextPreview(session: Session, maxChars: number = 500): string {

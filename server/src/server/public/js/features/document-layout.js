@@ -1,7 +1,7 @@
-/* Panel width management for the Cursor-like three-column workspace.
+/* Column width management for the three-column shell.
  *
- * Left: file explorer (#sidebar)  →  #explorer-resize
- * Right: AI chat (#chat-panel)     →  #chat-rail-resize
+ * Left: explorer (#sidebar)  →  #explorer-resize
+ * Right: chat (#chat-panel)  →  #chat-rail-resize
  */
 
 let explorerWidth = Number(localStorage.getItem("explorerWidth") || 270);

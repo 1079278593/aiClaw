@@ -7,10 +7,11 @@ export class ReflectionsError extends Error {
   }
 }
 
-export const ROOT_REL = "inputs/reflections";
+/** 心得区顶层路径。v2 起不再有 inputs/ 模块根。 */
+export const ROOT_REL = "reflections";
 
 export function reflectionsRoot(userDataDir?: string): string {
-  return path.join(getPaths(userDataDir).inputs, "reflections");
+  return getPaths(userDataDir).reflections;
 }
 
 export function normalizeRel(input: string): string {

@@ -12,6 +12,7 @@ import {
   readReflection,
   renameReflectionFolder,
   updateReflection,
+  getReflectionsStore,
 } from "../../reflections/store.js";
 import {
   deleteReflectionMedia,
@@ -22,6 +23,9 @@ import {
   type CropRect,
 } from "../../reflections/media.js";
 import { parseReflectionPaste } from "../../reflections/parse.js";
+import { calibrateDirs, INDEX_FILENAME } from "../../index/indexer.js";
+import { getPaths } from "../../config/paths.js";
+import { logger } from "../../logger/index.js";
 import { readMultipart } from "../form.js";
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson } from "../http-types.js";
@@ -34,15 +38,31 @@ function parseCropField(raw: string): CropRect | undefined {
   return { left: parts[0], top: parts[1], width: parts[2], height: parts[3] };
 }
 
+/**
+ * 打开心得首页 / 某一层时的 L1 校准（plan §5.7）。
+ *
+ * 只对传入的层做 `readdir` + 比较，不递归；失败不阻塞请求——
+ * 索引是派生物，读失败时顶多让 Agent 读到稍旧的清单。
+ */
+async function calibrateReflectionLayers(absDirs: string[]): Promise<void> {
+  try {
+    const writer = getReflectionsStore().indexWriter;
+    await calibrateDirs(absDirs, writer, { baseDir: getPaths().base });
+  } catch (error) {
+    logger.warn(`reflections index calibration skipped: ${(error as Error).message}`);
+  }
+}
+
 export const handleReflectionsRoutes: RouteHandler = async ({ req, res, url }) => {
   try {
     if (url.pathname === "/api/reflections" && req.method === "GET") {
       if (url.searchParams.get("view") === "tree") {
-        sendJson(res, { tree: await listReflectionTree() });
+        // 心得首页：校准根层（外部 NAS 手拖后靠这一下自愈）。
+        await calibrateReflectionLayers([getPaths().reflections]);
+        sendJson(res, { tree: await listReflectionTree(), indexFile: INDEX_FILENAME });
         return true;
       }
-      const items = await listReflections({ q: url.searchParams.get("q") ?? undefined });
-      sendJson(res, { reflections: items });
+      sendJson(res, { reflections: await listReflections({ q: url.searchParams.get("q") ?? undefined }) });
       return true;
     }
 

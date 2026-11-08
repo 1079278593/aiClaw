@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { compactSession, BUILTIN_COMPACTION_PROMPT } from "./compaction.js";
+import { compactSession, BUILTIN_COMPACTION_PROMPT, CONSTRAINT_SECTION_HEADER } from "./compaction.js";
 import { createSession, addMessage, loadSession } from "../session/index.js";
 import { getPaths } from "../config/paths.js";
 import { setupTestDir, cleanupTestDir } from "../test-utils.js";
@@ -46,9 +46,12 @@ const mockConfig: Config = {
   maxTokens: 4096,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
+      injectDistillMap: false,
+      autoRefreshDistill: false,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1", accessToken: "", corsOrigins: [] },
-  fs: { allowedDirs: ["inputs", "knowledge_base", "files"], allowedFiles: ["memory.md"] },
+  fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
   tools: {
     tavily: {
       enabled: false,
@@ -102,12 +105,18 @@ async function createSessionWithMessages(testDir: string): Promise<string> {
 describe("compactSession", () => {
   let testDir: string;
 
+  const SUMMARY = "## 对话背景\n已讨论 token 压缩。\n\n## 未解问题\n无";
+
   beforeEach(async () => {
     testDir = await setupTestDir("compaction-test");
     mockComplete.mockReset();
-    mockComplete.mockResolvedValue({
-      content: "## 对话背景\n已讨论 token 压缩。\n\n## 未解问题\n无",
-      finish_reason: "stop",
+    // 两步压缩：第 1 次是约束提取，第 2 次是摘要。默认没有约束。
+    mockComplete.mockImplementation(async (_apiKey: string, messages: Message[]) => {
+      const system = String(messages[0]?.content ?? "");
+      if (system.includes("逐字保留的约束")) {
+        return { content: "无", finish_reason: "stop" };
+      }
+      return { content: SUMMARY, finish_reason: "stop" };
     });
   });
 
@@ -149,7 +158,12 @@ describe("compactSession", () => {
     await writeFile(paths.compactionPromptFile, "自定义压缩提示词", "utf-8");
 
     await compactSession(sessionId, mockConfig, testLogger(testDir));
-    const messages = mockComplete.mock.calls[0][1] as Message[];
+    const summaryCall = mockComplete.mock.calls.find((call) => {
+      const messages = call[1] as Message[];
+      return String(messages[0]?.content ?? "").includes("自定义压缩提示词");
+    });
+    expect(summaryCall).toBeTruthy();
+    const messages = summaryCall![1] as Message[];
     expect(messages[0].content).toBe("自定义压缩提示词");
   });
 
@@ -159,8 +173,11 @@ describe("compactSession", () => {
     await rm(paths.compactionPromptFile, { force: true });
 
     await compactSession(sessionId, mockConfig, testLogger(testDir));
-    const messages = mockComplete.mock.calls[0][1] as Message[];
-    expect(messages[0].content).toBe(BUILTIN_COMPACTION_PROMPT);
+    const summaryCall = mockComplete.mock.calls.find((call) => {
+      const messages = call[1] as Message[];
+      return String(messages[0]?.content ?? "") === BUILTIN_COMPACTION_PROMPT;
+    });
+    expect(summaryCall).toBeTruthy();
   });
 
   it("creates archive file in conversation_archive", async () => {
@@ -170,5 +187,64 @@ describe("compactSession", () => {
     await compactSession(sessionId, mockConfig, testLogger(testDir));
     const archiveFiles = await readdir(paths.conversationArchive);
     expect(archiveFiles.some((file) => file.startsWith(`${sessionId}_`) && file.endsWith(".jsonl"))).toBe(true);
+  });
+
+  it("11. 压缩后约束清单逐字保留在摘要里", async () => {
+    const sessionId = await createSessionWithMessages(testDir);
+    const constraints = [
+      "所有 API 返回必须是 JSON，字段名用 camelCase。",
+      "不要修改 knowledge_base/ 下的任何文件。",
+    ];
+    mockComplete.mockImplementation(async (_apiKey: string, messages: Message[]) => {
+      const system = String(messages[0]?.content ?? "");
+      if (system.includes("逐字保留的约束")) {
+        // 模型会加上列表前缀与围栏，规整后必须与原文一字不差。
+        return { content: `\`\`\`\n- ${constraints[0]}\n- ${constraints[1]}\n\`\`\``, finish_reason: "stop" };
+      }
+      return { content: SUMMARY, finish_reason: "stop" };
+    });
+
+    const result = await compactSession(sessionId, mockConfig, testLogger(testDir));
+    expect(result.constraints).toEqual(constraints);
+    expect(result.constraintsExtracted).toBe(true);
+
+    const session = await loadSession(sessionId, testDir);
+    const summary = String(session.messages[1].content);
+    expect(summary).toContain(CONSTRAINT_SECTION_HEADER);
+    // 逐字：每条约束原文完整出现在摘要中，且带 "- " 前缀。
+    for (const constraint of constraints) {
+      expect(summary).toContain(`- ${constraint}`);
+    }
+    // 清单在摘要之后，不是插在中间。
+    expect(summary.indexOf(CONSTRAINT_SECTION_HEADER)).toBeGreaterThan(summary.indexOf("未解问题"));
+  });
+
+  it("约束提取失败不阻塞压缩，退回单步摘要", async () => {
+    const sessionId = await createSessionWithMessages(testDir);
+    let call = 0;
+    mockComplete.mockImplementation(async (_apiKey: string, messages: Message[]) => {
+      call += 1;
+      const system = String(messages[0]?.content ?? "");
+      if (system.includes("逐字保留的约束")) throw new Error("provider 500");
+      return { content: SUMMARY, finish_reason: "stop" };
+    });
+
+    const result = await compactSession(sessionId, mockConfig, testLogger(testDir));
+    expect(result.constraints).toEqual([]);
+    expect(result.constraintsExtracted).toBe(false);
+    expect(call).toBe(2);
+
+    const session = await loadSession(sessionId, testDir);
+    expect(session.messages[1].content).toBe(SUMMARY);
+    expect(String(session.messages[1].content)).not.toContain(CONSTRAINT_SECTION_HEADER);
+  });
+
+  it("模型返回「无」时不加空小节", async () => {
+    const sessionId = await createSessionWithMessages(testDir);
+    const result = await compactSession(sessionId, mockConfig, testLogger(testDir));
+    expect(result.constraints).toEqual([]);
+    expect(result.constraintsExtracted).toBe(false);
+    const session = await loadSession(sessionId, testDir);
+    expect(String(session.messages[1].content)).toBe(SUMMARY);
   });
 });

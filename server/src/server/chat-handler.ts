@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Config, ProviderName } from "../config/index.js";
 import { chatStream } from "../chat/index.js";
+import type { ContextBudgetReport } from "../chat/context-budget.js";
 import type { TokenSpeedSnapshot } from "../chat/speed.js";
 import type { UsageRecord } from "../llm/types.js";
 import type { getLogger } from "../logger/index.js";
@@ -14,9 +15,11 @@ import { buildPersonContextSuffix, personIdFromThreadPath } from "../people/cont
 import { ORGANIZE_USER_TEXT, applyOrganizeResult, buildOrganizeMaterials, splitOrganizeReply, visibleBeforeMarker } from "../people/organize.js";
 import { entriesAfter, getPersonRecord, readEntries } from "../people/store.js";
 import { replaceLastAssistantContent } from "../session/index.js";
+import { classifyToolRisk, needsConfirmation, sessionGrantKey } from "../tools/risk.js";
 
 const WRITE_PERMISSION_TOOLS = new Set(["write", "edit", "delete", "move", "web_search", "web_fetch"]);
 
+/** 旧的粗粒度判定（保留给测试与旧调用点）。新逻辑用 `classifyToolRisk`。 */
 export function requiresToolPermission(client: Pick<Client, "writePermOpen">, toolName: string): boolean {
   return WRITE_PERMISSION_TOOLS.has(toolName) && !client.writePermOpen;
 }
@@ -82,6 +85,7 @@ export async function processChatMessage(options: {
   logger: ReturnType<typeof getLogger>;
 }): Promise<void> {
   const { client, sessionId, content, images, provider, model, thinkingEffort, previewPath, selectedPreviewText, threadPath, captureJob, pendingPermissions, config, logger } = options;
+  const confirmMode = config.fs?.confirm ?? "session";
   
   // Abort any existing chat for this session
   cancelChat(sessionId, pendingPermissions);
@@ -161,6 +165,7 @@ export async function processChatMessage(options: {
     let rawResponse = "";
     let usage: UsageRecord | undefined;
     let contextUsage: UsageRecord | undefined;
+    let budget: ContextBudgetReport | undefined;
     let tokenSpeed: TokenSpeedSnapshot | undefined;
 
     for await (const result of chatStream(sessionId, llmUserContent, config, {
@@ -174,15 +179,26 @@ export async function processChatMessage(options: {
       onToolCall: (name, input, callId) => sendChatEvent({ type: "toolCall", name, input, callId }),
       onToolResult: (name, resultContent, isError, callId) => sendChatEvent({ type: "toolResult", name, content: resultContent, isError, callId }),
       checkPermission: async (toolName, input) => {
-        if (!requiresToolPermission(client, toolName)) return true;
+        // 分级授权：safe 免确认；session 同会话同类只问一次；always 每次都问。
+        // writePermOpen 仍然代表「本会话已全量放行」，保留给旧前端开关。
+        if (client.writePermOpen) return true;
+        const risk = classifyToolRisk(toolName, input, confirmMode);
+        const key = sessionGrantKey(toolName, input);
+        const grants = (client.grants ??= new Set<string>());
+        if (!needsConfirmation(risk, grants, key)) return true;
         const requestId = randomUUID();
         sendChatEvent({
           type: "toolPermissionRequest",
           requestId,
           toolName,
+          risk,
           details: buildPermissionDetails(toolName, input),
         });
-        return new Promise<boolean>((resolve) => pendingPermissions.set(requestId, { resolve, sessionId }));
+        const allowed = await new Promise<boolean>((resolve) =>
+          pendingPermissions.set(requestId, { resolve, sessionId }));
+        // 用户点了「允许」→ 记住这一档，后续同类操作不再打扰。
+        if (allowed && risk === "session") grants.add(key);
+        return allowed;
       },
     })) {
       if (!result.done) {
@@ -207,6 +223,7 @@ export async function processChatMessage(options: {
         }
         usage = result.usage;
         contextUsage = result.contextUsage;
+        budget = result.budget;
         tokenSpeed = result.tokenSpeed;
       }
     }
@@ -251,6 +268,7 @@ export async function processChatMessage(options: {
       usage: summarize(usage),
       contextUsage: summarize(contextUsage),
       tokenSpeed,
+      ...(budget ? { budget } : {}),
     });
     logger.info(`Chat completed: ${(await loadSession(sessionId)).title}`);
   } catch (error) {

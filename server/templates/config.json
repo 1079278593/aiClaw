@@ -195,6 +195,7 @@
   "maxTokens": 16384,
   "contextMaxTokens": 500000,
   "contextMaxMessages": 0,
+  "injectRootIndex": false,
   "maxToolCalls": 30,
   "tools": {
     "tavily": {

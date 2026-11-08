@@ -62,4 +62,28 @@ describe("app state", () => {
 
     expect((await loadAppState(testDir)).recentModels).toEqual([]);
   });
+
+  it("14. reflectionsSessionId 跨天保持、不影响 lastActiveSessionId、同值不重写", async () => {
+    const { setReflectionsSession, isReflectionsSession, clearReflectionsSession } = await import("./index.js");
+    await setLastActiveSession("chat-1", testDir);
+    await setReflectionsSession("reflections-1", testDir);
+
+    // 「跨天」：重新从磁盘加载，两个字段都在。
+    const state = await loadAppState(testDir);
+    expect(state.lastActiveSessionId).toBe("chat-1");
+    expect(state.reflectionsSessionId).toBe("reflections-1");
+    expect(isReflectionsSession(state, "reflections-1")).toBe(true);
+    expect(isReflectionsSession(state, "chat-1")).toBe(false);
+
+    // 幂等：同值不写盘。
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockClear();
+    await setReflectionsSession("reflections-1", testDir);
+    expect(vi.mocked(writeFile)).not.toHaveBeenCalled();
+
+    await clearReflectionsSession(testDir);
+    const cleared = await loadAppState(testDir);
+    expect(cleared.reflectionsSessionId).toBeUndefined();
+    expect(cleared.lastActiveSessionId).toBe("chat-1");
+  });
 });

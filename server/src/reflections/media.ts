@@ -85,7 +85,7 @@ export function resolveMediaRelFromNote(notePath: string, src: string): string {
   const normalized = src.replaceAll("\\", "/").trim();
   const dir = path.posix.dirname(notePath);
   if (normalized.startsWith("./")) return path.posix.normalize(`${dir}/${normalized.slice(2)}`);
-  if (normalized.startsWith("inputs/reflections/")) return path.posix.normalize(normalized);
+  if (normalized.startsWith(`${ROOT_REL}/`)) return path.posix.normalize(normalized);
   return path.posix.normalize(`${dir}/${normalized}`);
 }
 

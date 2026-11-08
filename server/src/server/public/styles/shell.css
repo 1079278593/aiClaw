@@ -1,12 +1,13 @@
 /* =====================================================================
- * Cursor-like three-column workspace
+ * Three-column app shell
  *
- *   [left file explorer] | [middle document reader] | [right chat]
+ *   [left explorer] | [middle document reader] | [right chat]
  *
  * Loaded after product.css — this file owns the final layout for the
- * new columns and the generic expandable directory tree. Older layout
- * rules that target removed markup (#action-rail, #doc-columns,
- * workspace modes, ...) simply go unused.
+ * three columns and the generic expandable directory tree.
+ *
+ * 左栏顶部的「文档 / 人物 / 心得」是三个面板（panel），只切换左栏列表
+ * 与中间区显示，不换会话、不持久化。见 js/state.js 的 state.panel。
  * ===================================================================== */
 
 :root {
@@ -694,18 +695,18 @@ body {
   }
 }
 
-#workspace-switch {
+#panel-switch {
   display: flex;
   gap: 2px;
   padding: 0 8px 6px;
   flex-shrink: 0;
 }
 
-#sidebar.collapsed #workspace-switch {
+#sidebar.collapsed #panel-switch {
   display: none;
 }
 
-#workspace-switch button,
+#panel-switch button,
 #people-toolbar button,
 #reflections-toolbar button,
 .people-panes button {
@@ -715,7 +716,7 @@ body {
   padding: 2px 8px;
 }
 
-#workspace-switch button.active,
+#panel-switch button.active,
 #people-toolbar button.active,
 #reflections-toolbar button.active,
 .people-panes button.active,
@@ -724,16 +725,16 @@ body {
   background: var(--surface-2, #f3f0e8);
 }
 
-body.people-workspace #file-root-tabs,
-body.people-workspace #file-tree,
-body.people-workspace #doc-view-tabs,
-body.people-workspace #doc-preview-toolbar,
-body.people-workspace #doc-preview-content,
-body.reflections-workspace #file-root-tabs,
-body.reflections-workspace #file-tree,
-body.reflections-workspace #doc-view-tabs,
-body.reflections-workspace #doc-preview-toolbar,
-body.reflections-workspace #doc-preview-content {
+body.people-panel #file-root-tabs,
+body.people-panel #file-tree,
+body.people-panel #doc-view-tabs,
+body.people-panel #doc-preview-toolbar,
+body.people-panel #doc-preview-content,
+body.reflections-panel #file-root-tabs,
+body.reflections-panel #file-tree,
+body.reflections-panel #doc-view-tabs,
+body.reflections-panel #doc-preview-toolbar,
+body.reflections-panel #doc-preview-content {
   display: none;
 }
 
@@ -1350,4 +1351,282 @@ body.reflections-workspace #doc-preview-content {
   font-size: 12px;
   color: var(--muted);
   white-space: pre-wrap;
+}
+
+/* ── 心得面板底部「待应用」入口 ─────────────────────────── */
+#file-explorer {
+  position: relative;
+}
+
+#reflections-browser {
+  position: relative;
+}
+
+#reflections-list {
+  padding-bottom: 64px;
+  flex: 1;
+  min-height: 0;
+}
+
+.reflections-footer {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.reflections-chat-entry {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.reflections-chat-entry:hover {
+  background: var(--surface-2, #f3f0e8);
+  color: var(--text, inherit);
+}
+
+.reflections-chat-entry.has-badge {
+  color: var(--text, inherit);
+  border-color: var(--accent, #b08b4f);
+}
+
+.reflections-chat-entry svg {
+  width: 15px;
+  height: 15px;
+}
+
+.reflections-chat-badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent, #b08b4f);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ── 待应用提案面板 ─────────────────────────────────────── */
+.pending-panel {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #fff);
+  border-right: 1px solid var(--line, #ddd);
+}
+
+.pending-panel[hidden] {
+  display: none;
+}
+
+.pending-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--line, #eee);
+  font-size: 13px;
+}
+
+.pending-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  max-height: 40%;
+  flex-shrink: 0;
+}
+
+.pending-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.pending-row:hover,
+.pending-row.active {
+  background: var(--surface-2, #f3f0e8);
+}
+
+.pending-row-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-row-meta {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-detail {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px 12px;
+  border-top: 1px solid var(--line, #eee);
+}
+
+.pending-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.pending-detail-target {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.pending-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pending-diff-col h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.pending-diff-col pre {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line, #eee);
+  border-radius: 6px;
+  background: var(--surface-2, #f7f5f0);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.pending-actions button {
+  flex: 1;
+  min-width: 88px;
+  padding: 6px 10px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pending-actions button:hover:not(:disabled) {
+  background: var(--surface-2, #f3f0e8);
+}
+
+.pending-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 批量应用结果（plan §12.2）：逐条显示，冲突不能被汇总成一个「成功」 */
+.pending-batch {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+  background: var(--surface-2, #f7f4ec);
+}
+
+.pending-batch-head {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pending-batch-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-batch-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.pending-batch-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+
+.pending-batch-row.ok .pending-batch-label {
+  color: #23663f;
+  background: #e3f3e9;
+  border-color: #bfe0cc;
+}
+
+.pending-batch-row.warn .pending-batch-label {
+  color: #8a4b12;
+  background: #fdeedd;
+  border-color: #f0d3b2;
+}
+
+.pending-batch-row.muted .pending-batch-label {
+  color: var(--muted, #777);
+  background: var(--surface-3, #eee);
+}
+
+.pending-batch-target {
+  color: var(--muted, #777);
+  word-break: break-all;
+}
+
+.empty-state-copy {
+  margin: 12px 8px;
+  font-size: 12px;
+  color: var(--muted);
 }

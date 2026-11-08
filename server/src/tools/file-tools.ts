@@ -7,8 +7,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolContext, ToolDefinition, ToolResult } from "./types.js";
 import type { MessageContentPart } from "../types/index.js";
+import type { FSPolicy } from "../config/schema.js";
 import { MAX_IMAGE_BYTES, normalizeImageBuffer } from "../media/image.js";
-import { assertPathAllowed, resolveAllowedDirs, resolveAllowedFiles, resolvePath, ToolError } from "./fs-policy.js";
+import {
+  assertFsAccess,
+  pathMatchesAny,
+  resolvePath,
+  resolvePolicyEntries,
+  ToolError,
+} from "./fs-policy.js";
 
 type ListInput = { path: string };
 type ReadInput = { path: string; offset?: number; limit?: number };
@@ -17,7 +24,7 @@ type EditInput = { path: string; old_string: string; new_string: string };
 type GrepInput = { pattern: string; path?: string; literal?: boolean; regex?: boolean };
 type MoveInput = { path: string; new_path: string };
 type DeleteInput = { path: string };
-type FilePolicy = { allowedDirs: string[]; allowedFiles: string[] };
+type FilePolicy = FSPolicy;
 
 // Image types that vision models reliably accept as data URLs.
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
@@ -85,7 +92,7 @@ function toRelativePath(resolved: string): string {
   return path.relative(resolvePath("."), resolved).replaceAll("\\", "/");
 }
 
-async function collectFiles(root: string): Promise<string[]> {
+async function collectFiles(root: string, policy?: FilePolicy): Promise<string[]> {
   const stat = await fs.stat(root);
   if (!stat.isDirectory()) return [root];
 
@@ -97,6 +104,8 @@ async function collectFiles(root: string): Promise<string[]> {
     const entries = await fs.readdir(current, { withFileTypes: true });
     for (const entry of entries) {
       const full = path.join(current, entry.name);
+      // denied 是 Agent 工具的禁域：连遍历都不进入。
+      if (policy && pathMatchesAny(full, policy.denied)) continue;
       if (entry.isDirectory()) stack.push(full);
       else if (entry.isFile()) out.push(full);
     }
@@ -108,16 +117,16 @@ async function collectFiles(root: string): Promise<string[]> {
 function makeListTool(policy: FilePolicy): ToolDefinition<ListInput> {
   return {
     name: "list",
-    description: "列出允许目录下的文件和目录。使用相对于数据目录的路径，例如 'inputs' 或 'knowledge_base'。",
+    description: "列出允许目录下的文件和目录。使用相对于数据目录的路径，例如 'reflections' 或 'knowledge_base'。",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string", description: "相对目录路径，例如 'inputs' 或 'knowledge_base'" } },
+      properties: { path: { type: "string", description: "相对目录路径，例如 'reflections' 或 'knowledge_base'" } },
       required: ["path"],
     },
     async execute(input) {
       try {
         const resolved = resolvePath(input.path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "read", policy);
         const entries = await fs.readdir(resolved, { withFileTypes: true });
         const items = entries.map((entry) => ({
           name: entry.name,
@@ -164,11 +173,11 @@ function makeReadTool(policy: FilePolicy): ToolDefinition<ReadInput> {
   return {
     name: "read",
     description:
-      "读取允许目录或允许单个文件中的文件。使用相对于数据目录的路径，例如 'inputs/notes.txt' 或 'inputs/photo.png'。文本文件返回内容，默认最多返回 2000 行且不超过 50KB，超出会截断并提示；可用 offset（从1开始的行号）和 limit 读取指定范围的行，大文件用 offset 分段续读。图片文件（png/jpg/jpeg/gif/webp）会作为图片返回，供视觉模型查看。",
+      "读取允许目录或允许单个文件中的文件。使用相对于数据目录的路径，例如 'reflections/某篇.md' 或 'people/<id>/profile.md'。文本文件返回内容，默认最多返回 2000 行且不超过 50KB，超出会截断并提示；可用 offset（从1开始的行号）和 limit 读取指定范围的行，大文件用 offset 分段续读。图片文件（png/jpg/jpeg/gif/webp）会作为图片返回，供视觉模型查看。",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "相对文件路径，例如 'inputs/notes.txt' 或 'inputs/photo.png'" },
+        path: { type: "string", description: "相对文件路径，例如 'reflections/某篇.md' 或 'people/<id>/profile.md'" },
         offset: { type: "number", description: "从1开始的行号，指定从哪一行开始读取（仅文本文件，可选）" },
         limit: { type: "number", description: "要读取的行数（仅文本文件，可选，默认 2000）" },
       },
@@ -177,7 +186,7 @@ function makeReadTool(policy: FilePolicy): ToolDefinition<ReadInput> {
     async execute(input, context) {
       try {
         const resolved = resolvePath(input.path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "read", policy);
         const ext = path.extname(resolved).toLowerCase();
         if (IMAGE_EXTENSIONS.has(ext)) {
           return await readImageAsParts(resolved, input.path, ext, context);
@@ -198,11 +207,11 @@ function makeReadTool(policy: FilePolicy): ToolDefinition<ReadInput> {
 function makeWriteTool(policy: FilePolicy): ToolDefinition<WriteInput> {
   return {
     name: "write",
-    description: "将内容写入允许目录或允许单个文件中的文件。使用相对于数据目录的路径，例如 'inputs/notes.txt' 或 'memory.md'。",
+    description: "将内容写入可写区（people / distill / pending / agents）的文件。使用相对于数据目录的路径，例如 'people/<id>/profile.md' 或 'distill/knowledge/overview.md'。知识区（reflections / knowledge_base）只读，改动请用 propose_change。",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "相对文件路径，例如 'inputs/notes.txt' 或 'memory.md'" },
+        path: { type: "string", description: "相对文件路径，例如 'people/<id>/profile.md'" },
         content: { type: "string", description: "要写入的内容" },
       },
       required: ["path", "content"],
@@ -210,7 +219,7 @@ function makeWriteTool(policy: FilePolicy): ToolDefinition<WriteInput> {
     async execute(input) {
       try {
         const resolved = resolvePath(input.path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "write", policy);
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         await fs.writeFile(resolved, input.content, "utf-8");
         return { content: `Written to ${input.path}` };
@@ -225,11 +234,11 @@ function makeWriteTool(policy: FilePolicy): ToolDefinition<WriteInput> {
 function makeEditTool(policy: FilePolicy): ToolDefinition<EditInput> {
   return {
     name: "edit",
-    description: "在允许的文件中，将第一次出现的 old_string 替换为 new_string。使用相对于数据目录的路径，例如 'inputs/notes.txt' 或 'memory.md'。",
+    description: "在可写区的文件中，将第一次出现的 old_string 替换为 new_string。使用相对于数据目录的路径，例如 'people/<id>/profile.md'。",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "相对文件路径，例如 'inputs/notes.txt' 或 'memory.md'" },
+        path: { type: "string", description: "相对文件路径，例如 'people/<id>/profile.md'" },
         old_string: { type: "string", description: "要查找并替换的字符串" },
         new_string: { type: "string", description: "替换后的字符串" },
       },
@@ -238,7 +247,7 @@ function makeEditTool(policy: FilePolicy): ToolDefinition<EditInput> {
     async execute(input) {
       try {
         const resolved = resolvePath(input.path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "write", policy);
         const original = await fs.readFile(resolved, "utf-8");
 
         // Try exact match first
@@ -304,10 +313,11 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
 
         const roots = input.path
           ? [resolvePath(input.path)]
-          : [...policy.allowedDirs, ...policy.allowedFiles];
+          : [...resolvePolicyEntries(policy.readable), ...resolvePolicyEntries(policy.writable)]
+            .filter((root) => !pathMatchesAny(root, policy.denied));
 
         for (const root of roots) {
-          assertPathAllowed(root, policy.allowedDirs, policy.allowedFiles);
+          assertFsAccess(root, "read", policy);
         }
 
         // 默认正则；literal: true（或旧参数 regex: false）强制字面量子串匹配。
@@ -341,7 +351,7 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
         for (const root of roots) {
           let files: string[] = [];
           try {
-            files = await collectFiles(root);
+            files = await collectFiles(root, policy);
           } catch (err) {
             if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
             throw err;
@@ -404,12 +414,12 @@ function makeGrepTool(policy: FilePolicy): ToolDefinition<GrepInput> {
 function makeMoveTool(policy: FilePolicy): ToolDefinition<MoveInput> {
   return {
     name: "move",
-    description: "在允许目录内重命名或移动文件。源路径和目标路径都必须在允许目录内。使用相对于数据目录的路径。",
+    description: "在可写区内重命名或移动文件。源与目标都必须在可写区（people / distill / pending / agents）。知识区（reflections / knowledge_base）不可移动。",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "当前相对文件路径，例如 'inputs/old.txt'" },
-        new_path: { type: "string", description: "新的相对文件路径，例如 'inputs/new.txt'" },
+        path: { type: "string", description: "当前相对文件路径，例如 'people/<id>/profile.md'" },
+        new_path: { type: "string", description: "新的相对文件路径，例如 'people/<id>/profile.old.md'" },
       },
       required: ["path", "new_path"],
     },
@@ -417,8 +427,8 @@ function makeMoveTool(policy: FilePolicy): ToolDefinition<MoveInput> {
       try {
         const resolved = resolvePath(input.path);
         const resolvedNew = resolvePath(input.new_path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
-        assertPathAllowed(resolvedNew, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "write", policy);
+        assertFsAccess(resolvedNew, "write", policy);
         const stat = await fs.stat(resolved);
         if (stat.isDirectory()) {
           return { content: "cannot move a directory", isError: true };
@@ -437,24 +447,45 @@ function makeMoveTool(policy: FilePolicy): ToolDefinition<MoveInput> {
   };
 }
 
+function archiveRelativePath(relativePath: string): string | null {
+  // people/<id>/... → people/<id>/_archive/<stamp>-<name>
+  // agents/...      → agents/.../_archive/<stamp>-<name>
+  // distill/...     → distill/.../_archive/<stamp>-<name>
+  const parts = relativePath.split("/");
+  if (parts.length < 2) return null;
+  const name = parts[parts.length - 1];
+  const dir = parts.slice(0, -1);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return [...dir, "_archive", `${stamp}-${name}`].join("/");
+}
+
 function makeDeleteTool(policy: FilePolicy): ToolDefinition<DeleteInput> {
   return {
     name: "delete",
-    description: "删除允许目录或允许单个文件中的文件。只能删除文件，不能删除目录。",
+    description: "删除可写区（people / distill / pending / agents）中的文件。只能删文件，不能删目录；people / agents / distill 下的删除会先移入同级 _archive 而非物理删除。",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "相对文件路径，例如 'inputs/old.txt' 或 'memory.md'" },
+        path: { type: "string", description: "相对文件路径，例如 'people/<id>/digest.md'" },
       },
       required: ["path"],
     },
     async execute(input) {
       try {
         const resolved = resolvePath(input.path);
-        assertPathAllowed(resolved, policy.allowedDirs, policy.allowedFiles);
+        assertFsAccess(resolved, "write", policy);
         const stat = await fs.stat(resolved);
         if (stat.isDirectory()) {
           return { content: "cannot delete a directory", isError: true };
+        }
+        const base = path.resolve(resolvePath("."));
+        const relativePath = path.relative(base, resolved).replaceAll("\\", "/");
+        const archived = archiveRelativePath(relativePath);
+        if (archived && /^(people|agents|distill)\//.test(relativePath)) {
+          const archiveAbs = path.resolve(base, archived);
+          await fs.mkdir(path.dirname(archiveAbs), { recursive: true });
+          await fs.rename(resolved, archiveAbs);
+          return { content: `Archived ${input.path} to ${archived}` };
         }
         await fs.unlink(resolved);
         return { content: `Deleted ${input.path}` };
@@ -469,19 +500,28 @@ function makeDeleteTool(policy: FilePolicy): ToolDefinition<DeleteInput> {
   };
 }
 
+/** 策略在调用时才解析为绝对路径：工具随租户切换复用同一份定义。 */
 function bindPolicy(policy: FilePolicy): FilePolicy {
-  return {
-    get allowedDirs() {
-      return resolveAllowedDirs(policy.allowedDirs);
-    },
-    get allowedFiles() {
-      return resolveAllowedFiles(policy.allowedFiles);
-    },
-  };
+  return policy;
 }
 
-export function createFileTools(allowedDirs: string[], allowedFiles: string[] = []): ToolDefinition[] {
-  const policy = bindPolicy({ allowedDirs, allowedFiles });
+/**
+ * 创建文件工具。
+ *
+ * 新签名接收完整三档策略；旧的 `(allowedDirs, allowedFiles)` 形式仍可用，
+ * 会映射为 readable = writable = 两者并集（仅为兼容既有调用点与测试）。
+ */
+export function createFileTools(
+  policyOrDirs: FilePolicy | string[],
+  legacyAllowedFiles: string[] = [],
+): ToolDefinition[] {
+  const policy: FilePolicy = Array.isArray(policyOrDirs)
+    ? {
+      readable: [...policyOrDirs, ...legacyAllowedFiles],
+      writable: [...policyOrDirs, ...legacyAllowedFiles],
+      denied: [],
+    }
+    : bindPolicy(policyOrDirs);
   return [
     makeListTool(policy),
     makeReadTool(policy),

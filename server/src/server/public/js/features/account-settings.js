@@ -115,6 +115,22 @@ export function initAccountSettings() {
   };
   const close = () => modal?.classList.remove("open");
   document.getElementById("account-settings-btn")?.addEventListener("click", () => { void open(); });
+  document.getElementById("rebuild-index-btn")?.addEventListener("click", async () => {
+    const button = document.getElementById("rebuild-index-btn");
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    try {
+      const { response, data } = await requestJson("/api/reflections/index/rebuild", jsonRequest("POST", {}));
+      if (!response.ok || data?.ok === false) {
+        window.alert(data?.error || "重建索引失败");
+        return;
+      }
+      window.alert(`索引已重建：扫描 ${data.scanned} 层，重写 ${data.rewritten} 层。`);
+      document.getElementById("settings-dropdown")?.classList.remove("open");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
   document.getElementById("account-close-btn")?.addEventListener("click", close);
   modal?.addEventListener("click", (event) => {
     if (event.target === modal) close();

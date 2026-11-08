@@ -203,14 +203,14 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 | 字段 | 说明 |
 |---|---|
-| `threadPath` | `inputs/people/<id>`。必须是已有的人，否则拒绝。有此字段时改附 [capture.md](capture.md) 第 10 节的系统提示 |
+| `threadPath` | `people/<id>`。必须是已有的人，否则拒绝。有此字段时改附 [capture.md](capture.md) 第 10 节的系统提示 |
 | `captureJob` | 只有「整理」按钮带 `organize`。省略时是普通咨询，完成了也不写 `profile.md` 和 `digest.md` |
 
-正在看原文或历史简报时，`previewPath` 分别为 `inputs/people/<id>/entries.jsonl`、`inputs/people/<id>/digest.md`。选中文字时再带 `selectedPreviewText`。没打开这两份、只是选中了人，不设置 `previewPath`。
+正在看原文或历史简报时，`previewPath` 分别为 `people/<id>/entries.jsonl`、`people/<id>/digest.md`。选中文字时再带 `selectedPreviewText`。没打开这两份、只是选中了人，不设置 `previewPath`。
 
 ## 8. 心得 reflections
 
-根目录：`inputs/reflections/`。首页是文件夹。进入文件夹后才列出该层笔记，按 `updatedAt` 在客户端分成今天、昨天、前 7 天、前 30 天，更早按年份（东八区）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。保存更新 `updatedAt`，不改已有 `createdAt`。
+根目录：`reflections/`。首页是文件夹。进入文件夹后才列出该层笔记，按 `updatedAt` 在客户端分成今天、昨天、前 7 天、前 30 天，更早按年份（东八区）。真相源是文件树，无 index。每篇为 Markdown，可选 YAML front matter：`title`、`occurredAt`、`context`、`createdAt`、`updatedAt`。保存更新 `updatedAt`，不改已有 `createdAt`。
 
 ### 文内媒体（备忘录式内嵌）
 
@@ -219,7 +219,7 @@ UX：录音和图片插在正文里。界面不展示 `:::aiclaw-audio` 原文�
 存储（Obsidian 式 sidecar，不是苹果不透明库）：
 
 ```text
-inputs/reflections/<folder>/
+reflections/<folder>/
   散步随想.md
   散步随想.assets/
     20261028T032828Z_a1.m4a
@@ -231,7 +231,7 @@ inputs/reflections/<folder>/
 - `move` / 按日期归夹：同一操作移动 `*.md` + 同名 `*.assets/`（若存在）；相对链接无需改写。
 - 删除篇时一并删除对应 `.assets/`。
 - 用户在 NAS 上手拖时，md 与 `.assets` 应一起拖。
-- 覆盖或删除前，服务端先把当前版本存到 `<data>/.reflection-history/<篇相对路径>/<时间戳>.md`，每个文件保留最近 3 份。这个目录在 `inputs/reflections` 之外，不进心得树，也不受移动/改名影响。误覆盖后可直接从那里取回。
+- 覆盖或删除**不再写应用内历史快照**（`.reflection-history` 已弃用）。恢复依赖 NAS 快照 + pending 的哈希校验：AI 想改就先落 `pending/`，应用前用 `baseHash` 确认原文没被别处改过。
 
 图片上传：客户端先裁剪（网页 canvas、App 全屏裁剪框），再交给服务端统一处理：
 
@@ -280,5 +280,5 @@ inputs/reflections/<folder>/
 
 语音：App 手动开始/结束（备忘录式，不因时长或静音自动停录）。Web 浏览器录音保留约 5 分钟安全上限自动结束，避免标签页长时间占麦。静音自动停更适合「听写会话」，不适合「原声附件」（停顿思考会被误切）。「改转写草稿」只改标记内文字；系统 Speech 不能对已存原声自动重转，云端精转属后续。
 
-拿去问：打开该篇后发 `chatMessage` 带 `previewPath`（路径如 `inputs/reflections/inbox/xxx.md`），不设 `threadPath`。
+拿去问：打开该篇后发 `chatMessage` 带 `previewPath`（路径如 `reflections/inbox/xxx.md`），不设 `threadPath`。
 

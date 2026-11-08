@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws";
 import type { ProviderName } from "../config/index.js";
 import type { TokenSpeedSnapshot } from "../chat/speed.js";
+import type { ContextBudgetReport } from "../chat/context-budget.js";
 import type { NormalizedUsage } from "../llm/types.js";
 import type { Message } from "../types/index.js";
 
@@ -9,6 +10,8 @@ export type Client = {
   sessionId?: string;
   isAlive: boolean;
   writePermOpen: boolean;
+  /** 已放行的「会话内一次授权」key（plan §3.5）。 */
+  grants?: Set<string>;
   tenantId?: string;
 };
 
@@ -66,6 +69,8 @@ export type ServerMessage =
       usage?: UsageSummary;
       contextUsage?: UsageSummary;
       tokenSpeed?: TokenSpeedSnapshot;
+      /** 上下文预算占比报表（§6.5）。飞行前估算值，UI 可与实际 prompt_tokens 对照。 */
+      budget?: ContextBudgetReport;
     }
   | {
       type: "chatSpeed";
@@ -80,5 +85,5 @@ export type ServerMessage =
   | { type: "chatCancelled"; sessionId: string; runId: string; sequence: number; fullResponse: string }
   | { type: "toolCall"; sessionId: string; runId: string; sequence: number; name: string; input: Record<string, unknown>; callId: string }
   | { type: "toolResult"; sessionId: string; runId: string; sequence: number; name: string; content: string; isError: boolean; callId: string }
-  | { type: "toolPermissionRequest"; sessionId: string; runId: string; sequence: number; requestId: string; toolName: string; details: Record<string, string> }
+  | { type: "toolPermissionRequest"; sessionId: string; runId: string; sequence: number; requestId: string; toolName: string; risk?: "safe" | "session" | "always"; details: Record<string, string> }
   | { type: "error"; message: string; sessionId?: string; runId?: string; sequence?: number };

@@ -14,6 +14,8 @@ import type { ServerMessage } from "./protocol.js";
 import { handleContentRoutes } from "./routes/content.js";
 import { handleGitSyncRoutes } from "./routes/git-sync.js";
 import { handlePeopleRoutes } from "./routes/people.js";
+import { handleDistillRoutes } from "./routes/distill.js";
+import { handlePendingRoutes } from "./routes/pending.js";
 import { handleReflectionsRoutes } from "./routes/reflections.js";
 import { handleSessionRoutes } from "./routes/sessions.js";
 import { handleSystemRoutes } from "./routes/system.js";
@@ -30,7 +32,7 @@ export function createHttpHandler(options: {
 }): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { host, port, config, logger, broadcast } = options;
   const gitSyncEnabled = isLoopbackHost(host);
-  const routes = [handleSystemRoutes, handleGitSyncRoutes, handleSessionRoutes, handlePeopleRoutes, handleReflectionsRoutes, handleContentRoutes];
+  const routes = [handleSystemRoutes, handleGitSyncRoutes, handleSessionRoutes, handlePeopleRoutes, handlePendingRoutes, handleDistillRoutes, handleReflectionsRoutes, handleContentRoutes];
 
   return async (req, res) => {
     try {

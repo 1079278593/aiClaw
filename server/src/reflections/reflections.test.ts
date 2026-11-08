@@ -68,7 +68,7 @@ describe("reflections store", () => {
 
   async function setup() {
     testDir = await mkdtemp(path.join(tmpdir(), `${BRAND_SLUG}-reflections-`));
-    await mkdir(path.join(testDir, "inputs"), { recursive: true });
+    await mkdir(testDir, { recursive: true });
     return testDir;
   }
 
@@ -81,7 +81,7 @@ describe("reflections store", () => {
       body: "xxx正文xxx",
       userDataDir: dir,
     });
-    expect(created.path).toBe("inputs/reflections/inbox/想法的 时刻 独占性.md");
+    expect(created.path).toBe("reflections/inbox/想法的 时刻 独占性.md");
     expect(created.folder).toBe("inbox");
 
     const listed = await listReflections({ userDataDir: dir });
@@ -101,13 +101,13 @@ describe("reflections store", () => {
 
   it("lists dragged files without front matter", async () => {
     const dir = await setup();
-    const folder = path.join(dir, "inputs", "reflections", "从记事本");
+    const folder = path.join(dir, "reflections", "从记事本");
     await mkdir(folder, { recursive: true });
     await writeFile(path.join(folder, "旧笔记.txt"), "只有正文\n第二行", "utf-8");
     const listed = await listReflections({ userDataDir: dir });
     expect(listed).toHaveLength(1);
     expect(listed[0].title).toBe("旧笔记");
-    expect(listed[0].path).toBe("inputs/reflections/从记事本/旧笔记.txt");
+    expect(listed[0].path).toBe("reflections/从记事本/旧笔记.txt");
     const doc = await readReflection(listed[0].path, dir);
     expect(doc.body).toContain("只有正文");
   });
@@ -118,16 +118,16 @@ describe("reflections store", () => {
 
   it("converts txt to md on first save", async () => {
     const dir = await setup();
-    const folder = path.join(dir, "inputs", "reflections", "inbox");
+    const folder = path.join(dir, "reflections", "inbox");
     await mkdir(folder, { recursive: true });
     await writeFile(path.join(folder, "草稿.txt"), "正文", "utf-8");
     const updated = await updateReflection({
-      path: "inputs/reflections/inbox/草稿.txt",
+      path: "reflections/inbox/草稿.txt",
       title: "草稿",
       body: "新正文",
       userDataDir: dir,
     });
-    expect(updated.path).toBe("inputs/reflections/inbox/草稿.md");
+    expect(updated.path).toBe("reflections/inbox/草稿.md");
     expect(updated.body).toContain("新正文");
   });
 
@@ -143,10 +143,10 @@ describe("reflections store", () => {
       userDataDir: dir,
     });
     const moved = await moveReflection({ from: created.path, toFolder: "主题A", userDataDir: dir });
-    expect(moved.path).toBe("inputs/reflections/主题A/散步.md");
+    expect(moved.path).toBe("reflections/主题A/散步.md");
 
     const organized = await organizeReflectionByDate(moved.path, dir);
-    expect(organized.path).toBe("inputs/reflections/2026/10/散步.md");
+    expect(organized.path).toBe("reflections/2026/10/散步.md");
 
     const batch = await importReflections({
       text: ["甲", "2026年1月1日08:00:00 公园", "文1", "", "乙", "2026年1月2日09:00:00 家", "文2"].join("\n"),
@@ -180,10 +180,10 @@ describe("reflections store", () => {
     expect(updated.createdAt).toBe(created.createdAt);
     expect(updated.updatedAt! > created.updatedAt!).toBe(true);
 
-    const folder = path.join(dir, "inputs", "reflections", "inbox");
-    const renamed = path.join(dir, "inputs", "reflections", "改名");
+    const folder = path.join(dir, "reflections", "inbox");
+    const renamed = path.join(dir, "reflections", "改名");
     await rename(folder, renamed);
-    const doc = await readReflection("inputs/reflections/改名/甲.md", dir);
+    const doc = await readReflection("reflections/改名/甲.md", dir);
     expect(doc.createdAt).toBe(created.createdAt);
     expect(doc.updatedAt).toBe(updated.updatedAt);
   });
@@ -213,12 +213,12 @@ describe("reflections store", () => {
       title: "新名",
       userDataDir: dir,
     });
-    expect(renamed.path).toBe("inputs/reflections/inbox/新名.md");
+    expect(renamed.path).toBe("reflections/inbox/新名.md");
     expect(renamed.body).toContain("./新名.assets/");
-    await access(path.join(dir, "inputs", "reflections", "inbox", "新名.assets", path.basename(written.mediaPath)));
+    await access(path.join(dir, "reflections", "inbox", "新名.assets", path.basename(written.mediaPath)));
 
-    await mkdir(path.join(dir, "inputs", "reflections", "inbox", "孤儿.assets"), { recursive: true });
-    await writeFile(path.join(dir, "inputs", "reflections", "inbox", "孤儿.assets", "x.jpg"), "y");
+    await mkdir(path.join(dir, "reflections", "inbox", "孤儿.assets"), { recursive: true });
+    await writeFile(path.join(dir, "reflections", "inbox", "孤儿.assets", "x.jpg"), "y");
     const orphans = await listOrphanAssets(dir);
     expect(orphans.some((item) => item.path.endsWith("孤儿.assets"))).toBe(true);
     expect(orphans.some((item) => item.path.endsWith("新名.assets"))).toBe(false);
@@ -232,7 +232,7 @@ describe("reflections store", () => {
       folder: "inbox",
       userDataDir: dir,
     });
-    expect(assetsDirRelative(created.path)).toBe("inputs/reflections/inbox/散步随想.assets");
+    expect(assetsDirRelative(created.path)).toBe("reflections/inbox/散步随想.assets");
     expect(relativeMediaSrc(created.path, "a.m4a")).toBe("./散步随想.assets/a.m4a");
 
     const written = await writeReflectionMedia({
@@ -255,17 +255,17 @@ describe("reflections store", () => {
       userDataDir: dir,
     });
     const moved = await moveReflection({ from: withMarker.path, toFolder: "主题A", userDataDir: dir });
-    expect(moved.path).toBe("inputs/reflections/主题A/散步随想.md");
-    await access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.assets", path.basename(written.mediaPath)));
-    await expect(access(path.join(dir, "inputs", "reflections", "inbox", "散步随想.assets"))).rejects.toBeTruthy();
+    expect(moved.path).toBe("reflections/主题A/散步随想.md");
+    await access(path.join(dir, "reflections", "主题A", "散步随想.assets", path.basename(written.mediaPath)));
+    await expect(access(path.join(dir, "reflections", "inbox", "散步随想.assets"))).rejects.toBeTruthy();
 
     const tree = await listReflectionTree(dir);
     const theme = tree.find((node) => node.name === "主题A");
     expect(theme?.children?.some((node) => isAssetsDirNameLike(node.name))).toBeFalsy();
 
     await deleteReflection(moved.path, dir);
-    await expect(access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.md"))).rejects.toBeTruthy();
-    await expect(access(path.join(dir, "inputs", "reflections", "主题A", "散步随想.assets"))).rejects.toBeTruthy();
+    await expect(access(path.join(dir, "reflections", "主题A", "散步随想.md"))).rejects.toBeTruthy();
+    await expect(access(path.join(dir, "reflections", "主题A", "散步随想.assets"))).rejects.toBeTruthy();
   });
 
   it("formats audio marker and rewrites assets prefix", () => {
@@ -416,7 +416,7 @@ describe("reflections store", () => {
     expect(shortNote?.excerpt).toBe("只有一句话");
   });
 
-  it("keeps a copy of the previous version before overwriting or deleting", async () => {
+  it("does not keep an in-app history copy (v2 relies on NAS snapshots)", async () => {
     const dir = await setup();
     const created = await createReflection({
       title: "会丢正文",
@@ -430,23 +430,16 @@ describe("reflections store", () => {
       body: "第二版正文",
       userDataDir: dir,
     });
-    const historyDir = path.join(dir, ".reflection-history", created.path);
-    const versions = (await readdir(historyDir)).filter((name) => name.endsWith(".md"));
-    expect(versions).toHaveLength(1);
-    const saved = await readFile(path.join(historyDir, versions[0]), "utf-8");
-    expect(saved).toContain("第一版正文");
+    // v2 弃用 .reflection-history：应用内不再留快照，恢复完全依赖 NAS 快照 / 回收站。
+    await expect(access(path.join(dir, ".reflection-history"))).rejects.toBeTruthy();
 
-    // 空正文覆盖也能找回上一版
+    // 空正文覆盖仍受保护：已有内容时不接受「清空式」保存。
     await updateReflection({ path: created.path, title: "会丢正文", body: "", userDataDir: dir });
     const still = await readReflection(created.path, dir);
     expect(still.body).toContain("第二版正文");
-    const after = (await readdir(historyDir)).filter((name) => name.endsWith(".md")).sort();
-    expect(after).toHaveLength(2);
 
-    // 删除同样留底
     await deleteReflection(created.path, dir);
-    const onDelete = (await readdir(historyDir)).filter((name) => name.endsWith(".md"));
-    expect(onDelete).toHaveLength(3);
+    await expect(access(path.join(dir, ".reflection-history"))).rejects.toBeTruthy();
   });
 
   it("renames and deletes folders with their notes inside", async () => {    const dir = await setup();
@@ -458,18 +451,18 @@ describe("reflections store", () => {
       userDataDir: dir,
     });
 
-    const renamed = await renameReflectionFolder({ path: "inputs/reflections/主题A", name: "主题B", userDataDir: dir });
-    expect(renamed.path).toBe("inputs/reflections/主题B");
-    const movedDoc = await readReflection("inputs/reflections/主题B/散步.md", dir);
+    const renamed = await renameReflectionFolder({ path: "reflections/主题A", name: "主题B", userDataDir: dir });
+    expect(renamed.path).toBe("reflections/主题B");
+    const movedDoc = await readReflection("reflections/主题B/散步.md", dir);
     expect(movedDoc.title).toBe("散步");
 
-    await expect(renameReflectionFolder({ path: "inputs/reflections", name: "x", userDataDir: dir })).rejects.toThrow(/根目录/);
-    await expect(deleteReflectionFolder("inputs/reflections", dir)).rejects.toThrow(/根目录/);
+    await expect(renameReflectionFolder({ path: "reflections", name: "x", userDataDir: dir })).rejects.toThrow(/根目录/);
+    await expect(deleteReflectionFolder("reflections", dir)).rejects.toThrow(/根目录/);
 
-    await deleteReflectionFolder("inputs/reflections/主题B", dir);
-    await expect(access(path.join(dir, "inputs", "reflections", "主题B"))).rejects.toBeTruthy();
+    await deleteReflectionFolder("reflections/主题B", dir);
+    await expect(access(path.join(dir, "reflections", "主题B"))).rejects.toBeTruthy();
     expect(await listReflections({ userDataDir: dir })).toHaveLength(0);
-    expect(created.path).toBe("inputs/reflections/主题A/散步.md");
+    expect(created.path).toBe("reflections/主题A/散步.md");
   });
 });
 

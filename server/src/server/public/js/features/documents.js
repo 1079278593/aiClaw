@@ -9,7 +9,9 @@ export function configureDocuments(options) {
   reportError = options.showError;
 }
 
-const LOCAL_DOC_BROWSER_ROOTS = ["knowledge_base", "inputs"];
+// 文档浏览器服务 knowledge_base 与 distill：心得/人物各有自己的入口（plan §2.2）。
+// distill 是 AI 生成的派生物，只读打开，方便人核对摘要与原文是否一致。
+const LOCAL_DOC_BROWSER_ROOTS = ["knowledge_base", "distill"];
 const TRILIUM_ROOT = "trilium";
 let triliumEnabled = false;
 
@@ -165,7 +167,7 @@ function getDocSelectionStatusText() {
  *  Each directory row toggles its children; child directories are
  *  indented by nesting depth. Children for a directory are fetched
  *  lazily from /api/documents/tree and cached. The same logic is used
- *  for knowledge_base / inputs / trilium roots.
+ *  for knowledge_base / trilium roots.
  * ------------------------------------------------------------------ */
 
 async function fetchDocTree(path) {
@@ -380,7 +382,9 @@ function isEditableText() {
     activeTabPath
     && openTabs.find((tab) => tab.path === activeTabPath)
     && docPreviewKind === "text"
-    && !isTriliumDocPath(activeTabPath),
+    && !isTriliumDocPath(activeTabPath)
+    // 蒸馏摘要由 Agent 生成，服务端会拒绝写入，这里同步禁掉编辑入口。
+    && !activeTabPath.startsWith("distill/"),
   );
 }
 

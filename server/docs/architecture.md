@@ -57,7 +57,38 @@ src/
 │       └── js/           # Native ES modules, features and renderers
 ├── chat/                 # Chat orchestration
 │   ├── index.ts          # chat(), chatStream(), agentic loop, context truncation
+│   ├── context-budget.ts # 上下文预算装配纯函数（锚定用户消息、按 turn 装填）
 │   └── compaction.ts     # Session compaction (LLM-summarized history)
+├── distill/              # 蒸馏区（AI 可写的缓存，plan_distill）
+│   ├── format.ts         # 头解析 / 渲染 / 过期判定（纯函数，解析失败一律退化）
+│   ├── store.ts          # 读写摘要、meta/overview.md 地图、_archive 保留 3 份
+│   ├── generate.ts       # 收集来源 → LLM → 原子写 → 归档 → 重建地图；summarizer 可注入
+│   └── inject.ts         # 地图注入（默认关）+ 与记忆共享预算、同来源去重
+├── index/                # 目录级结构索引
+│   ├── indexer.ts        # listChildEntries / compareNameZh / IndexWriter / L0 同步 / L1 校准 / listIndexableDirs
+│   │                      # ensureIndexRoots：启动时为空 reflections/、reflections/inbox/、knowledge_base/ 补空 _index.md
+│   │                      # L1 触发点：GET /api/reflections?view=tree（打开首页，校准根层）、
+│   │                      #          GET /api/reflections/index、POST /api/reflections/index/rebuild（递归一次性）
+│   ├── watcher.ts        # L2 加速：fs.watch + debounce 300ms，事件只当提示，写入仍走 IndexWriter
+│   └── watcher-manager.ts # 按租户起 watcher（background.ts 启动时逐个 ensure）
+├── memory/               # 单 Agent 记忆（plan §8）
+│   ├── types.ts          # MemoryLayer / MemoryEntryMeta / 体积上限 / 归档份数
+│   ├── store.ts          # 正文解析（`##` 分条）、index.jsonl 元数据、归档留 3 份、超限拒绝
+│   ├── score.ts          # importance + recency(exp) + bigram Jaccard，pinned 恒定入选
+│   └── inject.ts         # <memory trust="unverified"> 边界 + 指令式中和
+├── pending/              # 提案区（通往知识区的唯一出口）
+│   ├── store.ts          # createProposal / listPending / dismissProposal
+│   ├── apply.ts          # 二路哈希 apply + baseHash 重定位 + 索引同步 + applyAllProposals（批量、非原子）
+│   ├── archive-ttl.ts    # agents/people/distill 的 _archive 90 天清理
+│   └── ttl.ts            # 30 天归档 → 再 30 天物理删除
+├── reflections/          # 心得笔记（reflections/ 顶层目录）
+│   ├── paths.ts          # 路径解析（只认新路径，旧 inputs/ 前缀 404）
+│   ├── store.ts          # 增删改查、按日期归夹、批量导入
+│   └── media.ts          # 附件读写
+├── people/               # 人物资料（people/ 顶层目录）
+│   ├── store.ts          # 档案 / 原文 / 历史简报
+│   ├── profile.ts        # 档案行数与「砍半」保护
+│   └── context.ts        # 咨询上下文注入
 ├── llm/                  # LLM provider layer
 │   ├── index.ts          # createProvider() factory
 │   ├── types.ts          # LLMProvider interface, CompletionOptions, UsageRecord
@@ -70,9 +101,11 @@ src/
 │   ├── registry.ts       # Module-level tool registry (register/get/clear)
 │   ├── executor.ts       # executeTool() dispatcher
 │   ├── file-tools.ts     # Built-in tools: list, read (text & images), write, edit, grep, move, delete
+│   ├── propose-change.ts # propose_change：只写 pending/，不碰真相源
+│   ├── risk.ts           # 工具风险分级（safe / session / always）
 │   ├── web-tools.ts      # Optional Tavily search/fetch
 │   ├── trilium-tools.ts  # Optional read-only Trilium tools
-│   └── fs-policy.ts      # Path sandboxing (resolveAllowedDirs, assertPathAllowed)
+│   └── fs-policy.ts      # 三档 ACL：denied → writable → readable
 ├── trilium/              # Read-only Trilium ETAPI client
 │   ├── client.ts         # Search, list children, read content
 │   ├── html.ts           # HTML → readable text
@@ -85,7 +118,7 @@ src/
 │   ├── schema.ts         # Zod schema for config.json
 │   └── paths.ts          # User data dir resolution, path constants
 ├── app-state/            # Lightweight app state persistence
-│   └── index.ts          # lastActiveSessionId (restored on page load)
+│   └── index.ts          # lastActiveSessionId / reflectionsSessionId / recentModels
 ├── logger/               # Logging (tslog wrapper)
 │   └── index.ts          # Logger class, getLogger(), module-level logger proxy
 ├── errors/               # Error classes
@@ -108,13 +141,33 @@ $AICLAW_DATA_DIR/
 │   └── ...
 ├── conversation_archive/                # Compaction archives
 │   └── <sessionId>_<timestamp>.jsonl
-├── inputs/                              # Staging area for knowledge base files
+├── inputs/                              # 已弃用：不再是模块根（reflections/ 与 people/ 已提到顶层）
+├── reflections/                         # 心得笔记（AI 只读；改动走 pending）
+│   ├── _index.md                        # 目录级结构索引（脚本写，Agent 逐层读）
+│   └── inbox/
+│       └── _index.md
+├── people/                              # 人物资料（AI 可维护区，不放 _index.md）
+│   └── <id>/{meta.json,entries.jsonl,profile.md,digest.md}
+├── distill/                             # 蒸馏摘要（AI 可写，文档浏览器只读查看）
+├── pending/                             # 提案区
+│   ├── <proposalId>/{meta.json, base.md, proposed.md}
+│   └── _archive/                        # 已应用 / 过期（30 天后再 30 天物理删）
+├── agents/main/                         # 单 Agent 记忆
+│   ├── AGENT.md                         # 宪法（AI 只读）
+│   ├── user.md                          # 画像（AI 可写，`remember` layer=user）
+│   ├── runtime.md                       # 工作记忆
+│   └── memory/
+│       ├── focus.md                     # 当前关注点（pinned，恒定注入）
+│       ├── longterm.md                  # 长期记忆正文（`##` 分条，id 在 HTML 注释里）
+│       ├── index.jsonl                  # 全部条目的元数据；used/lastUsed 每轮只改这里
+│       └── _archive/                    # 覆盖前兜底，每文件保留最近 3 份
 ├── knowledge_base/                      # Knowledge base (markdown + files)
+│   ├── _index.md                        # 目录级结构索引
 │   ├── index.md                         # Global index of all knowledge bases
 │   └── <base-name>/
 │       ├── index.md                     # Per-base index (description + file list)
 │       └── ...                          # Knowledge files
-├── files/                               # AI workspace
+├── files/                               # AI 可写区（非「工作区」概念）
 │   ├── app_state.json                   # UI state (lastActiveSessionId)
 │   ├── usage_temp.json                  # Per-call token usage stream (pending archive)
 │   ├── usage_daily.json                 # Daily buckets, last 30 days (date×model×provider)
@@ -155,6 +208,17 @@ $AICLAW_DATA_DIR/
 | POST | `/api/sessions/:id/compact` | Compact session |
 | POST | `/api/sessions/:id/truncate` | Restart from a user message |
 | GET | `/api/app-state` | Load UI state |
+| POST | `/api/app-state/reflections-session` | 绑定移动端心得会话（幂等） |
+| GET | `/api/pending` | 待应用提案列表 + 角标 |
+| GET | `/api/pending/:id` | 提案详情（meta + base + proposed） |
+| POST | `/api/pending/:id/apply` | 应用（二路哈希；409 = 原文已变；200 + stale = 失效） |
+| POST | `/api/pending/apply-all` | 批量应用（顺序、非原子；逐条返回，冲突不中止后续） |
+| GET | `/api/distill/overview` | 蒸馏地图原文 |
+| GET | `/api/distill/stale` | 过期摘要扫描（只读，不重算） |
+| POST | `/api/distill/refresh` | 生成/重算一篇摘要（`scope` + `path` + `sources`） |
+| POST | `/api/pending/:id/dismiss` | 丢弃（`status = expired`） |
+| GET | `/api/reflections/index?path=` | 读某层 `_index.md`（读前先 L1 校准） |
+| POST | `/api/reflections/index/rebuild` | 一次性重建：递归校准 `reflections/` + `knowledge_base/` 各层 |
 | GET | `/api/usage/stats` | Aggregated token usage |
 | GET | `/api/usage/daily` | Daily token usage |
 | POST | `/api/usage/flush` | Archive pending usage records |
@@ -162,7 +226,7 @@ $AICLAW_DATA_DIR/
 | GET | `/api/commands` | Search configured commands |
 | GET | `/api/files` | Search allowed local files and, if enabled, Trilium notes |
 | GET/PUT | `/api/documents/content` | Read or update a text document (Trilium paths are read-only) |
-| GET | `/api/documents/tree` | Browse document roots (`knowledge_base`, `inputs`, optional `trilium`) |
+| GET | `/api/documents/tree` | Browse document roots (`knowledge_base`, optional `trilium`; `reflections` / `people` 各有独立入口) |
 
 - **WebSocket message types**:
 
@@ -195,8 +259,8 @@ Server → Client:
 - **Agentic loop** (`runAgenticLoop`): non-streaming LLM `complete()` calls, iterates tool-call→tool-result until `finish_reason !== "tool_calls"` or `maxToolCalls` reached
 - **Final output**: the entire response text is sent in one `chatChunk`, then rendered as Markdown on `chatEnd`
 - **Context truncation**: `truncateMessagesForContext()` — token-aware sliding window from newest to oldest
-- **System prompt**: `loadSystemPrompt()` loads `agent_system_prompt.txt` and appends a real-time `今天的日期是YYYY/MM/DD` date line; the date line is always present even if the file is absent
-- **Compaction**: `compactSession()` — sends full history to LLM, saves summary as new session, archives original JSONL
+- **System prompt**: `loadSystemPrompt()` 单一来源——`agents/main/AGENT.md` 存在且非空时用它，否则退回 `files/prompts/agent_system_prompt.txt`（旧装兼容）；末尾始终追加 `今天的日期是YYYY/MM/DD`。这两个路径都在 ACL 的 `denied` 内，但那只约束 Agent 工具，系统内部加载不受限。
+- **Compaction**: `compactSession()` 两步压缩（plan §9）——先独立调用一次 `extractConstraints()` 逐字抄写约束，再做现有摘要，结果拼成「摘要 + `## 以下为逐字保留的约束（勿改写）` + 清单」。约束提取失败只记日志，退回到原有的单步摘要。返回 `{ archivedAs, usage, constraints, constraintsExtracted }`。
 
 ### 3.4 LLM (`src/llm/`)
 - **Provider interface** (`LLMProvider`): `complete(apiKey, messages, options)` → `CompletionResponse`
@@ -227,7 +291,7 @@ Server → Client:
 - `GET /api/knowledge` parses `index.md` table and lists directories for the UI overview
 
 ### 3.9 Config (`src/config/`)
-- **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `maxToolCalls`, `server` (port/host), `fs` (allowedDirs/allowedFiles), `tools` (tavily, trilium), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
+- **Schema** (Zod): `providers` map, `defaultProvider`, `defaultModel`, `defaultThinkingEffort`, `maxTokens`, `contextMaxTokens`, `contextMaxMessages`, `injectRootIndex`（默认 `false`，注入 `reflections/_index.md`，超 1 KB 则放弃注入）, `maxToolCalls`, `server` (port/host), `fs.policy` (readable/writable/denied) 及其旧字段 `fs.allowedDirs`/`fs.allowedFiles`（仅字段兼容）, `tools` (tavily, trilium), `compaction` (provider/model/thinkingEffort). Each model may declare native `thinking` values.
 - **Supported providers**: `zai` (智谱), `dashscope` (阿里百炼), `deepseek`, `commandcode`
 - **Thinking levels**: the UI always adds `none`; each model's `thinking` list supplies provider-native values (for example, DeepSeek `high` / `max`). `none` is sent explicitly as that provider's disable parameter.
 - **`$AICLAW_DATA_DIR`** must be set via `.env` file, no default fallback
@@ -337,11 +401,18 @@ Browser                                                  Server
   "maxTokens": 4096,
   "contextMaxTokens": 100000,
   "contextMaxMessages": 0,
+  "injectRootIndex": false,
   "maxToolCalls": 10,
   "server": { "port": 3000, "host": "127.0.0.1" },
   "fs": {
-    "allowedDirs": ["inputs", "knowledge_base", "files"],
-    "allowedFiles": []
+    "policy": {
+      "readable": ["reflections", "people", "knowledge_base", "distill", "pending", "agents"],
+      "writable": ["people", "distill", "pending", "agents"],
+      "denied": [
+        "conversations", "logs", "files/prompts", "files/app_state.json",
+        "agents/main/AGENT.md", "agents/main/user.md"
+      ]
+    }
   },
   "compaction": {
     "provider": "zai",
@@ -364,11 +435,13 @@ The browser UI uses native ES modules without a frontend framework or bundler. `
 - Settings, usage, permissions, pickers and document browsing keep short-lived state inside their feature modules.
 
 ### 6.2 Rendering
-- `dom.js` creates the chat workspace and binds controls for the current session.
+- `dom.js` creates the chat shell and binds controls for the current session.
 - `render/messages.js` renders historical messages and restart controls.
 - `render/streaming.js` updates reasoning, tool calls, chunks, cursors and typing placeholders.
 - `markdown.js` renders Markdown and math content; `format.js` contains escaping and number formatting helpers.
-- `features/documents.js`, `pickers.js`, `permissions.js`, `usage.js`, `knowledge.js` and `settings.js` own their respective UI behavior.
+- `features/documents.js`, `features/people.js`, `features/reflections.js`, `features/pending.js`, `pickers.js`, `permissions.js`, `usage.js`, `knowledge.js` and `settings.js` own their respective UI behavior.
+- 「文档 / 人物 / 心得」是**左栏面板切换**（`state.panel`），与会话无关：切面板不换会话、也不持久化。切到心得时，右栏 `#chat-panel` 复用同一会话，只带 `reflectionPreview.previewPath` 作上下文。
+- 心得面板底部有「待应用」入口（带角标），点开是覆盖层：左列表、右侧 base/proposed 对比与「应用 / 丢弃」。
 
 ### 6.3 Communication
 - `websocket.js` owns one connection, JSON serialization and a 3-second reconnect timer. It has no feature imports. Auth uses a first-frame `{ type: "auth", token }` message. The client is ready only after `connected`.
@@ -380,10 +453,14 @@ The browser UI uses native ES modules without a frontend framework or bundler. `
 
 ## 7. Security
 
-### 7.1 File System Sandbox
+### 7.1 File System Sandbox（三档 ACL）
 - All file tool paths resolved relative to `$AICLAW_DATA_DIR/`
-- `assertPathAllowed()` checks resolved path is within `fs.allowedDirs` or matches `fs.allowedFiles`
-- Default: `inputs/`, `knowledge_base/`, `files/`
+- 判定顺序：`denied`（最高）→ `writable` → `readable` → 拒绝
+- 默认：`readable = reflections, people, knowledge_base, distill, pending, agents`；`writable = people, distill, pending, agents`
+- `denied` 只约束 **Agent 工具**，不约束系统（系统提示词、`app_state.json` 由服务端自己读写）
+- `reflections/` 与 `knowledge_base/` 对 AI **只读**：改动必须先 `propose_change` 落 `pending/`，由用户在「待应用」确认
+- `move` 的源与目标都必须在 `writable` 内；`delete` 在 `people/`、`agents/`、`distill/` 走归档
+- 旧配置的 `fs.allowedDirs` / `fs.allowedFiles` 映射为 `readable ∪ writable`（仅字段兼容，不做路径兼容）
 
 ### 7.2 API Keys
 - Stored in `config.json`, loaded by server at startup
@@ -403,4 +480,5 @@ The browser UI uses native ES modules without a frontend framework or bundler. `
 - **Vitest** for unit/integration tests
 - Test files alongside source: `*.test.ts`
 - `test-utils.ts`: `setupTestDir()` / `cleanupTestDir()` for filesystem-based tests
-- Key test files: `config/index.test.ts`, `session/index.test.ts`, `chat/index.test.ts`, `chat/compaction.test.ts`, `server/index.test.ts`, `server/auth.test.ts`, `tools/file-tools.test.ts`, `tools/executor.test.ts`, `tools/fs-policy.test.ts`
+- Key test files: `config/index.test.ts`, `session/index.test.ts`, `chat/index.test.ts`, `chat/context-budget.test.ts`, `chat/compaction.test.ts`, `server/index.test.ts`, `server/auth.test.ts`, `tools/file-tools.test.ts`, `tools/executor.test.ts`, `tools/fs-policy.test.ts`, `tools/acl.test.ts`, `index/indexer.test.ts`, `pending/pending.test.ts`, `people/people.test.ts`, `app-state/index.test.ts`
+- 索引失败分支（`index/indexer.test.ts` 第 28、29 条）**通过注入 `IndexWriter` stub 触发**，不 mock `node:fs`：要断言的组合状态是「文件已写好、索引没写成功」，mock fs 会连带拦掉正文写入。

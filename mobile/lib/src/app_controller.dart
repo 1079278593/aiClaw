@@ -183,6 +183,66 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     return id is String && id.isNotEmpty ? id : null;
   }
 
+  /// 心得对话用的独立会话（plan_reflections_chat.md §7.4）。
+  /// 它不出现在聊天列表里，join 时也不会覆盖 `lastActiveSessionId`。
+  String? reflectionsSessionId;
+
+  /// 「待应用」角标数字，进心得首页与一轮对话结束后刷新。
+  int pendingBadge = 0;
+
+  /// 打开心得对话：读 `app_state.reflectionsSessionId`，
+  /// 会话不存在就新建一个并回写。返回可用的会话 id。
+  Future<String?> openReflectionsSession() => _guard(_openReflectionsSession());
+
+  Future<String?> _openReflectionsSession() async {
+    final state = await api.getJson(apiUri(baseUrl, '/api/app-state'), token: token);
+    final stored = state['reflectionsSessionId'];
+    final storedId = stored is String && stored.isNotEmpty ? stored : null;
+    if (storedId != null) {
+      // 会话可能已被删除（本机或别的客户端），确认存在后再用。
+      try {
+        if (await _sessionExists(storedId)) {
+          reflectionsSessionId = storedId;
+          notifyListeners();
+          return storedId;
+        }
+      } on ApiException {
+        // 探测失败时退回新建，避免卡在弹层门口。
+      }
+    }
+    final created = await _createSession();
+    if (created.id.isEmpty) return null;
+    await api.sendJson(
+      'POST',
+      apiUri(baseUrl, '/api/app-state/reflections-session'),
+      token: token,
+      body: {'sessionId': created.id},
+    );
+    reflectionsSessionId = created.id;
+    notifyListeners();
+    return created.id;
+  }
+
+  /// 心得会话被 `GET /api/sessions` 过滤掉了，所以单独探测。
+  Future<bool> _sessionExists(String sessionId) async {
+    try {
+      await api.getJson(apiUri(baseUrl, '/api/sessions/$sessionId'), token: token);
+      return true;
+    } on ApiException catch (error) {
+      if (error.statusCode == 404) return false;
+      rethrow;
+    }
+  }
+
+  Future<void> refreshPendingBadge() => _guard(_refreshPendingBadge());
+
+  Future<void> _refreshPendingBadge() async {
+    final payload = await api.getJson(apiUri(baseUrl, '/api/pending'), token: token);
+    final badge = payload['badge'];
+    pendingBadge = badge is num ? badge.toInt() : 0;
+    notifyListeners();
+  }
+
   Future<SessionSummary> createSession() => _guard(_createSession());
 
   Future<SessionSummary> _createSession() async {
@@ -279,7 +339,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       images: organize ? null : images,
       previewPath: preview,
       selectedPreviewText: selection,
-      threadPath: person == null ? null : 'inputs/people/${person.personId}',
+      threadPath: person == null ? null : 'people/${person.personId}',
       captureJob: organize ? 'organize' : null,
     ));
     if (!organize) draftImages.clear();

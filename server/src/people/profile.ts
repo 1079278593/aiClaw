@@ -46,6 +46,29 @@ export function profileHeadingsComplete(markdown: string): boolean {
   return BASIC_ITEMS.every((item) => new RegExp(`^- ${item}：`, "m").test(markdown));
 }
 
+/** 归一化行数：去 BOM、CRLF → LF、忽略纯空白行（plan §3.3）。 */
+export function countNormalizedLines(markdown: string): number {
+  return markdown
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .length;
+}
+
+/** 新内容行数是否不到旧内容的一半（用于挡住「AI 把档案砍掉一半」）。 */
+export function shrinksByHalf(previous: string, next: string): boolean {
+  const before = countNormalizedLines(previous);
+  const after = countNormalizedLines(next);
+  if (before === 0) return false;
+  return after < before / 2;
+}
+
+/** 用户要求压缩时放行：提案 summary 或编辑说明里显式写「精简」。 */
+export function summaryAllowsCondense(summary: string | undefined): boolean {
+  return typeof summary === "string" && summary.includes("精简");
+}
+
 export function profileField(markdown: string, name: string): string {
   const match = markdown.match(new RegExp(`^- ${escapeRegExp(name)}：\\s*(.*)$`, "m"));
   return match?.[1]?.trim() ?? "";

@@ -46,12 +46,12 @@
 
 iPad 竖屏左栏是名单，右栏默认原文，可换成历史简报、档案或咨询。
 
-文档工作区和人物工作区来回切换时，不取消正在生成的运行。换人也不取消，只改变下一句要带的档案。
+「文档」面板和「人物」面板来回切换时，不取消正在生成的运行。换人也不取消，只改变下一句要带的档案。
 
 ## 4. 对象
 
 ```text
-inputs/people/<id>/
+people/<id>/
   meta.json
   entries.jsonl
   profile.md
@@ -255,8 +255,8 @@ schemaVersion: 1
 使用者是「我」。右侧「自己」是我，左侧是 id 为 {id} 的人。称呼、昵称、简称见档案，身份以 id 为准。
 档案正文：
 {profile.md 全文，或放不下时的路径}
-历史简报路径：inputs/people/<id>/digest.md
-原文路径：inputs/people/<id>/entries.jsonl
+历史简报路径：people/<id>/digest.md
+原文路径：people/<id>/entries.jsonl
 了解这个人先用档案。了解一段对话经过什么，先分段读历史简报。历史简报是摘要，不是原话。
 只有用户明确要看原文或原话时，才分段读原文。
 </系统提示>

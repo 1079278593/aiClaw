@@ -16,6 +16,7 @@ import { createWebSocketClient } from "./websocket.js";
 import { ensureAccessTokenGate, fetchHealth, setAccessToken } from "./access-token.js";
 import { createPeopleFeature } from "./features/people.js";
 import { createReflectionsFeature } from "./features/reflections.js";
+import { createPendingFeature } from "./features/pending.js";
 
 const state = createAppState();
 const actions = {};
@@ -39,6 +40,7 @@ const pickers = createPickerFeature({
 });
 const people = createPeopleFeature({ state, actions });
 const reflections = createReflectionsFeature({ state, actions });
+const pending = createPendingFeature({ state, actions });
 const view = createChatView({ state, documents, pickers, permissions, actions, people, reflections });
 const chat = createChatFeature({ state, socket, renderer, streaming, pickers, permissions, documents, actions });
 const sessions = createSessionFeature({ state, socket, renderer, pickers, permissions, actions });
@@ -47,6 +49,14 @@ Object.assign(actions, view, chat, sessions, {
   appendTypingDots: streaming.appendTypingDots,
   peopleRemount: () => people.remount(),
   reflectionsRemount: () => reflections.remount(),
+  pendingReload: (options) => pending.load(options),
+  afterPendingApplied: async (path) => {
+    if (state.panel === "reflections") await reflections.reload();
+    await documents.refreshDocBrowser();
+    void path;
+  },
+  // 面板切换只有一个实现（people.js），reflections 离开前先 flush 再调它
+  setPanel: (next) => people.setPanel(next),
   canLeaveReflections: () => reflections.canLeave(),
   prepareLeaveReflections: () => reflections.prepareLeave(),
 });
@@ -105,6 +115,7 @@ function bindGlobalEvents() {
   chat.bindGlobalEvents();
   people.bind();
   reflections.bind();
+  pending.bind();
   // Render initial static lucide icons
   window.lucide?.createIcons();
 }

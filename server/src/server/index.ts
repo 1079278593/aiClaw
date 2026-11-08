@@ -12,6 +12,7 @@ import {
   extractAccessTokenFromUrl,
 } from "./auth.js";
 import { createHttpHandler } from "./http.js";
+import { startBackgroundTasks } from "./background.js";
 import type { Client, ClientMessage, ServerMessage } from "./protocol.js";
 import { sendToClient } from "./send.js";
 import { handleWebSocketConnection } from "./websocket.js";
@@ -28,6 +29,7 @@ export type ServerState = {
   httpServer: ReturnType<typeof createServer>;
   wss: WebSocketServer;
   config: Config;
+  stopBackgroundTasks: () => void;
 };
 
 export async function startServer(overrides?: {
@@ -107,11 +109,14 @@ async function bootServer(overrides?: {
   });
   logger.info(`Server started on http://${host}:${port}`);
   logger.info(`WebSocket server ready at ws://${host}:${port}`);
-  return { port, host, clients, httpServer, wss, config };
+  // 启动跑一次 + 每 24 小时一次（plan §11）；不阻塞 listen。
+  const stopBackground = startBackgroundTasks(logger, config);
+  return { port, host, clients, httpServer, wss, config, stopBackgroundTasks: stopBackground };
 }
 
 export async function stopServer(state: ServerState): Promise<void> {
   const { clients, httpServer, wss } = state;
+  state.stopBackgroundTasks?.();
   const logger = getLogger(getPaths().logs);
   for (const ws of clients.keys()) ws.close();
   clients.clear();

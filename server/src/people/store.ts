@@ -9,6 +9,8 @@ import {
   profileHeadingsComplete,
   profileWithName,
   replaceUneditedName,
+  shrinksByHalf,
+  summaryAllowsCondense,
 } from "./profile.js";
 
 export type Person = {
@@ -36,7 +38,7 @@ export class PeopleError extends Error {
 }
 
 function peopleRoot(userDataDir?: string): string {
-  return path.join(getPaths(userDataDir).inputs, "people");
+  return getPaths(userDataDir).people;
 }
 
 function personDir(id: string, userDataDir?: string): string {
@@ -296,24 +298,39 @@ export async function deleteEntry(id: string, entryId: string, userDataDir?: str
   await savePerson({ ...person, updatedAt: new Date().toISOString() }, userDataDir);
 }
 
-export async function saveProfileDocument(id: string, markdown: string, userDataDir?: string): Promise<Person> {
+export async function saveProfileDocument(
+  id: string,
+  markdown: string,
+  userDataDir?: string,
+  options: { summary?: string } = {},
+): Promise<Person> {
   if (!profileHeadingsComplete(markdown)) throw new PeopleError("档案标题不完整", 400);
   const names = namesFromProfile(markdown);
   if (!names.name) throw new PeopleError("称呼不能为空", 400);
   const person = await readPerson(id, userDataDir);
   await assertNamesFree(personLabels({ ...person, ...names }), id, userDataDir);
-  await writeAtomic(path.join(personDir(id, userDataDir), "profile.md"), markdown.endsWith("\n") ? markdown : `${markdown}\n`);
+  const file = path.join(personDir(id, userDataDir), "profile.md");
+  // 砍半保护：用户要求压缩（summary 含「精简」）时放行（plan §3.3）。
+  if (!summaryAllowsCondense(options.summary)) {
+    const previous = await readFile(file, "utf-8").catch(() => "");
+    if (shrinksByHalf(previous, markdown)) {
+      throw new PeopleError("新档案行数不足原来的一半；确需压缩请在提案 summary 中写明「精简」", 400);
+    }
+  }
+  await writeAtomic(file, markdown.endsWith("\n") ? markdown : `${markdown}\n`);
   const next = { ...person, name: names.name, nicknames: names.nicknames, shortNames: names.shortNames };
   await savePerson(next, userDataDir);
   return next;
 }
 
 export function personIdFromProfilePath(inputPath: string): string | undefined {
-  const match = /^inputs\/people\/([A-Za-z0-9]+)\/profile\.md$/.exec(inputPath.replaceAll("\\", "/"));
+  const match = /^people\/([A-Za-z0-9]+)\/profile\.md$/.exec(inputPath.replaceAll("\\", "/"));
   return match?.[1];
 }
 
 export async function appendDigest(id: string, paragraph: string, organizedAt: string, userDataDir?: string): Promise<void> {
+  // 空内容 → no-op，不写盘（plan §3.3）。
+  if (!paragraph.trim()) return;
   const person = await readPerson(id, userDataDir);
   const file = path.join(personDir(id, userDataDir), "digest.md");
   const current = await readFile(file, "utf-8");
@@ -321,9 +338,14 @@ export async function appendDigest(id: string, paragraph: string, organizedAt: s
   await savePerson({ ...person, organizedAt }, userDataDir);
 }
 
-export async function writeProfileIfComplete(id: string, markdown: string, userDataDir?: string): Promise<boolean> {
+export async function writeProfileIfComplete(
+  id: string,
+  markdown: string,
+  userDataDir?: string,
+  options: { summary?: string } = {},
+): Promise<boolean> {
   if (!profileHeadingsComplete(markdown)) return false;
-  await saveProfileDocument(id, markdown, userDataDir);
+  await saveProfileDocument(id, markdown, userDataDir, options);
   return true;
 }
 

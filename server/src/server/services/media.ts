@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { extname, join, relative, resolve, sep } from "node:path";
 import type { Config } from "../../config/index.js";
+import { getFsPolicy } from "../../config/schema.js";
 import { getPaths } from "../../config/paths.js";
 import { createTriliumClient } from "../../trilium/client.js";
 import { formatTriliumRef, isTriliumEnabled } from "../../trilium/paths.js";
@@ -35,9 +36,16 @@ export function isTextFile(filePath: string): boolean {
   return !BINARY_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 
+/**
+ * 「文件」搜索与图片读取的根集合：只含工具可读区，不再依赖已废弃的 allowedDirs。
+ * denied 区（会话、日志、系统提示词）不参与。
+ */
 function getAllowedRoots(config: Config): Array<{ root: string; source: string }> {
   const base = getPaths().base;
-  return config.fs.allowedDirs.map((dir) => ({ source: dir, root: resolve(base, dir) }));
+  const policy = getFsPolicy(config);
+  return policy.readable
+    .filter((dir) => !policy.denied.some((denied) => dir === denied || dir.startsWith(`${denied}/`)))
+    .map((dir) => ({ source: dir, root: resolve(base, dir) }));
 }
 
 async function collectFiles(root: string, source: string, accepts: (filePath: string) => boolean): Promise<FileSummary[]> {

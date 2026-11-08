@@ -220,9 +220,9 @@ class _PersonPageState extends State<PersonPage>
     final viewingRaw = _pane == PersonPane.raw;
     final viewingDigest = _pane == PersonPane.digest;
     final path = viewingRaw
-        ? 'inputs/people/${widget.personId}/entries.jsonl'
+        ? 'people/${widget.personId}/entries.jsonl'
         : viewingDigest
-        ? 'inputs/people/${widget.personId}/digest.md'
+        ? 'people/${widget.personId}/digest.md'
         : _selectedText == null
         ? null
         : _selectedPath;
@@ -532,7 +532,7 @@ class _PersonPageState extends State<PersonPage>
         apiUri(widget.controller.baseUrl, '/api/documents/content'),
         token: widget.controller.token,
         body: {
-          'path': 'inputs/people/${widget.personId}/profile.md',
+          'path': 'people/${widget.personId}/profile.md',
           'content': markdown,
         },
       );
@@ -672,7 +672,7 @@ class _PersonPageState extends State<PersonPage>
               setState(() {
                 _selectedText = entry.text;
                 _selectedPath =
-                    'inputs/people/${widget.personId}/entries.jsonl';
+                    'people/${widget.personId}/entries.jsonl';
               });
               _publish();
             },
@@ -827,7 +827,7 @@ class _PersonPageState extends State<PersonPage>
             final text = content?.plainText.trim();
             if (text == null || text.isEmpty) return;
             _selectedText = text;
-            _selectedPath = 'inputs/people/${widget.personId}/digest.md';
+            _selectedPath = 'people/${widget.personId}/digest.md';
             _publish();
           },
           child: MarkdownBody(data: _digest.isEmpty ? '还没有历史简报' : _digest),

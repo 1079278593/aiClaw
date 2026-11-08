@@ -1464,7 +1464,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
   pointer-events: auto;
 }
 
-/* Workspace modes exchange the preview content and chat content below its header. */
+/* Preview and chat share the column below the document header. */
 #chat-content {
   --conversation-content-max-width: 810px;
   --conversation-inline-padding: clamp(16px, 2vw, 32px);
@@ -1478,49 +1478,6 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
   display: none;
   min-width: 0;
   min-height: 0;
-}
-#main-shell[data-workspace-mode="document"] #document-stage {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  background: var(--bg);
-}
-#main-shell[data-workspace-mode="document"] #document-stage #doc-preview-content {
-  background: var(--bg);
-}
-#main-shell[data-workspace-mode="document"] #doc-preview-panel > #chat-content {
-  flex: 1;
-  min-height: 0;
-}
-#workspace-mode-control {
-  position: absolute;
-  left: 50%;
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transform: translateX(-50%);
-}
-#workspace-mode-control .workspace-mode-btn {
-  min-width: 42px;
-  height: 28px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text2);
-  cursor: pointer;
-  font-size: 12px;
-}
-#workspace-mode-control .workspace-mode-btn + .workspace-mode-btn {
-  border-left: 1px solid var(--border);
-}
-#workspace-mode-control .workspace-mode-btn:hover:not(.active) {
-  background: var(--hover-bg);
-}
-#workspace-mode-control .workspace-mode-btn.active {
-  color: var(--text1);
-  font-weight: var(--weight-bold);
 }
 
 /* Popovers and dialogs */
@@ -2246,10 +2203,6 @@ html[data-theme="light"] #usage-table tfoot th {
   .header-icon-btn {
     width: 28px;
     height: 28px;
-  }
-  #workspace-mode-control .workspace-mode-btn {
-    min-width: 40px;
-    padding-inline: 7px;
   }
 }
 

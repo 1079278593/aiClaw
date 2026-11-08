@@ -42,9 +42,10 @@ const mockConfig = {
   maxTokens: 4096,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1" },
-  fs: { allowedDirs: ["inputs", "knowledge_base", "files"], allowedFiles: ["memory.md"] },
+  fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
   compaction: {
     provider: "zai",
     model: "GLM-4.7",

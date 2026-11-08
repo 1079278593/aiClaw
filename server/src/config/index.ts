@@ -17,10 +17,13 @@ import {
   ConfigSchema,
   DEFAULT_CONFIG,
   DEFAULT_FS_CONFIG,
+  DEFAULT_FS_POLICY,
   DEFAULT_SERVER_CONFIG,
   DEFAULT_TOOLS_CONFIG,
   SUPPORTED_PROVIDERS,
   type Config,
+  type FSConfig,
+  type FSPolicy,
   type ProviderName,
   type ProviderCredential,
   type ThinkingEffort,
@@ -199,6 +202,9 @@ function mergeWithDefaults(userConfig: Partial<Config>): Config {
     maxTokens: userConfig.maxTokens ?? DEFAULT_CONFIG.maxTokens,
     contextMaxTokens: userConfig.contextMaxTokens ?? DEFAULT_CONFIG.contextMaxTokens,
     contextMaxMessages: userConfig.contextMaxMessages ?? DEFAULT_CONFIG.contextMaxMessages,
+    injectRootIndex: userConfig.injectRootIndex ?? DEFAULT_CONFIG.injectRootIndex,
+    injectDistillMap: userConfig.injectDistillMap ?? DEFAULT_CONFIG.injectDistillMap,
+    autoRefreshDistill: userConfig.autoRefreshDistill ?? DEFAULT_CONFIG.autoRefreshDistill,
     maxToolCalls: userConfig.maxToolCalls ?? DEFAULT_CONFIG.maxToolCalls,
     server: {
       port: userConfig.server?.port ?? DEFAULT_SERVER_CONFIG.port,
@@ -207,8 +213,9 @@ function mergeWithDefaults(userConfig: Partial<Config>): Config {
       corsOrigins: userConfig.server?.corsOrigins ?? DEFAULT_SERVER_CONFIG.corsOrigins,
     },
     fs: {
-      allowedDirs: userConfig.fs?.allowedDirs ?? DEFAULT_FS_CONFIG.allowedDirs,
-      allowedFiles: userConfig.fs?.allowedFiles ?? DEFAULT_FS_CONFIG.allowedFiles,
+      // 旧配置兼容：只映射字段，不做路径兼容（旧前缀一律 404）。
+      policy: resolveFsPolicy(userConfig.fs),
+      confirm: userConfig.fs?.confirm ?? DEFAULT_FS_CONFIG.confirm,
     },
     tools: {
       tavily: {
@@ -306,6 +313,33 @@ function normalizeLegacyEffort(config: Record<string, unknown>): void {
   if (config.defaultThinkingEffort === "none") (config as Record<string, unknown>).defaultThinkingEffort = "off";
   const compaction = config.compaction as Record<string, unknown> | undefined;
   if (compaction?.thinkingEffort === "none") compaction.thinkingEffort = "off";
+}
+
+/**
+ * 旧 `allowedDirs` / `allowedFiles` 映射为新策略。
+ *
+ * - `allowedDirs` → readable ∪ writable（旧语义就是「可读写目录」）；
+ * - `allowedFiles` → **只进 readable**：单个白名单文件不是「可写区」的证据，
+ *   而且放开写会直接破坏「知识区只读」的语义。
+ *
+ * 只是配置字段兼容：新字段存在时以新字段为准，路径本身不做旧前缀双读。
+ */
+export function resolveFsPolicy(fs: Partial<FSConfig> | undefined): FSPolicy {
+  const legacyDirs = fs?.allowedDirs ?? [];
+  const legacyFiles = fs?.allowedFiles ?? [];
+  const hasLegacy = legacyDirs.length > 0 || legacyFiles.length > 0;
+  const policy = fs?.policy;
+  if (!policy && !hasLegacy) return DEFAULT_FS_POLICY;
+  const readable = policy?.readable ?? (hasLegacy ? [] : DEFAULT_FS_POLICY.readable);
+  const writable = policy?.writable ?? (hasLegacy ? [] : DEFAULT_FS_POLICY.writable);
+  if (!hasLegacy) {
+    return { readable, writable, denied: policy?.denied ?? DEFAULT_FS_POLICY.denied };
+  }
+  return {
+    readable: [...new Set([...readable, ...legacyDirs, ...legacyFiles])],
+    writable: [...new Set([...writable, ...legacyDirs])],
+    denied: policy?.denied ?? DEFAULT_FS_POLICY.denied,
+  };
 }
 
 export function resolveModelThinking(config: Config, provider: ProviderName, model: string, level?: string): { level: string; params: ThinkingParams } {

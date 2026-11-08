@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import { rm, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { chat, chatStream, truncateMessagesForContext, getChatContextPreview, sanitizeHistoryForProvider } from "./index.js";
+import { chat, chatStream, truncateMessagesForContext, getChatContextPreview, sanitizeHistoryForProvider, loadSystemPrompt, loadRootIndexForInjection, buildSystemBlocks, ROOT_INDEX_TOKEN_MAX } from "./index.js";
+import { getPaths } from "../config/paths.js";
 import { createSession } from "../session/index.js";
 import type { Message, Session } from "../types/index.js";
 import type { Config } from "../config/index.js";
@@ -47,9 +48,12 @@ const mockConfig: Config = {
   maxTokens: 4096,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
+      injectDistillMap: false,
+      autoRefreshDistill: false,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1", accessToken: "", corsOrigins: [] },
-  fs: { allowedDirs: ["inputs", "knowledge_base", "files"], allowedFiles: ["memory.md"] },
+  fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
   tools: {
     tavily: {
       enabled: false,
@@ -173,10 +177,80 @@ describe("chat", () => {
 
   it("chat rejects when real LLM call cannot complete in test", async () => {
     await expect(chat(session.id, "Hello", mockConfig)).rejects.toThrow();
-  });
+  }, 30_000);
 
   it("chatStream exposes async iterator and accepts thinkingEffort", () => {
     const generator = chatStream(session.id, "Hello", mockConfig, { thinkingEffort: "medium" });
     expect(typeof generator[Symbol.asyncIterator]).toBe("function");
+  });
+
+  it("8.1 系统提示词单一来源：AGENT.md 存在时优先于 files/prompts", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.agentsMain, { recursive: true });
+    await writeFile(paths.agentSystemPromptFile, "旧宪法", "utf-8");
+    await writeFile(paths.agentConstitutionFile, "新宪法：只看 AGENT.md", "utf-8");
+
+    const prompt = await loadSystemPrompt(mockConfig);
+    expect(prompt).toContain("新宪法：只看 AGENT.md");
+    expect(prompt).not.toContain("旧宪法");
+  });
+
+  it("8.1 AGENT.md 缺失时回退到 files/prompts（旧装兼容）", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.agentsMain, { recursive: true });
+    await writeFile(paths.agentSystemPromptFile, "旧宪法", "utf-8");
+
+    const prompt = await loadSystemPrompt(mockConfig);
+    expect(prompt).toContain("旧宪法");
+  });
+
+  it("8.1 AGENT.md 为空文件时继续回退，而不是把空内容当宪法", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.agentsMain, { recursive: true });
+    await writeFile(paths.agentConstitutionFile, "   \n  ", "utf-8");
+    await writeFile(paths.agentSystemPromptFile, "旧宪法", "utf-8");
+
+    const prompt = await loadSystemPrompt(mockConfig);
+    expect(prompt).toContain("旧宪法");
+  });
+
+  it("5.7 injectRootIndex 默认关闭时不注入根索引", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.reflections, { recursive: true });
+    await writeFile(path.join(paths.reflections, "_index.md"), "inbox/\n第一篇.md\n", "utf-8");
+
+    expect(await loadRootIndexForInjection(false)).toBeNull();
+    expect(buildSystemBlocks("策略", null).map((block) => block.name)).toEqual(["policy"]);
+  });
+
+  it("5.7 打开后注入根索引，并进 rootIndex 块", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.reflections, { recursive: true });
+    await writeFile(path.join(paths.reflections, "_index.md"), "inbox/\n第一篇.md\n", "utf-8");
+
+    const injected = await loadRootIndexForInjection(true);
+    expect(injected).toContain("第一篇.md");
+    const blocks = buildSystemBlocks("策略", injected);
+    expect(blocks.map((block) => block.name)).toEqual(["rootIndex", "policy"]);
+    expect(blocks[0].max).toBe(ROOT_INDEX_TOKEN_MAX);
+  });
+
+  it("5.7 根索引超过 1 KB 时放弃注入（不截断成半张地图）", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const paths = getPaths(testDir);
+    await mkdir(paths.reflections, { recursive: true });
+    // 每行 40 字节，40 行 = 1.6 KB，超过 ROOT_INDEX_BYTE_MAX。
+    await writeFile(
+      path.join(paths.reflections, "_index.md"),
+      Array.from({ length: 40 }, (_, index) => `${String(index).padStart(2, "0")}-${"长".repeat(13)}.md`).join("\n"),
+      "utf-8",
+    );
+
+    expect(await loadRootIndexForInjection(true)).toBeNull();
   });
 });

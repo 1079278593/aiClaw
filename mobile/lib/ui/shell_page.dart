@@ -77,8 +77,8 @@ class ShellPage extends StatefulWidget {
 class _ShellPageState extends State<ShellPage> {
   var _tab = 0;
   var _sidebar = 0;
-  /// docs | people | reflections
-  var _workspace = 'docs';
+  /// 左栏面板：docs | people | reflections（只切显示，不换会话）
+  var _panel = 'docs';
   String? _personId;
   var _personName = '';
   PersonConsult? _consult;
@@ -167,9 +167,9 @@ class _ShellPageState extends State<ShellPage> {
             final side = _sideWidth.clamp(_minSideWidth, (constraints.maxWidth * 0.5).clamp(_minSideWidth, 460.0)).toDouble();
             return Column(
               children: [
-                _workspaceSwitch(),
+                _panelSwitch(),
                 Expanded(
-                  child: _workspace == 'people'
+                  child: _panel == 'people'
                       ? Row(
                           children: [
                             SizedBox(width: side, child: _peopleList(embedded: true)),
@@ -177,7 +177,7 @@ class _ShellPageState extends State<ShellPage> {
                             Expanded(child: _personOrPrompt()),
                           ],
                         )
-                      : _workspace == 'reflections'
+                      : _panel == 'reflections'
                           ? ReflectionsListPage(controller: widget.controller)
                           : Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -239,11 +239,11 @@ class _ShellPageState extends State<ShellPage> {
             final chat = _chatWidth.clamp(_minChatWidth, maxChat).toDouble();
             return Column(
               children: [
-                _workspaceSwitch(),
+                _panelSwitch(),
                 Expanded(
-                  child: _workspace == 'people'
+                  child: _panel == 'people'
                       ? _peopleWide(total)
-                      : _workspace == 'reflections'
+                      : _panel == 'reflections'
                           ? ReflectionsListPage(controller: widget.controller)
                           : Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -270,7 +270,7 @@ class _ShellPageState extends State<ShellPage> {
     );
   }
 
-  Widget _workspaceSwitch() {
+  Widget _panelSwitch() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: SegmentedButton<String>(
@@ -279,8 +279,8 @@ class _ShellPageState extends State<ShellPage> {
           ButtonSegment(value: 'people', label: Text('人物')),
           ButtonSegment(value: 'reflections', label: Text('心得')),
         ],
-        selected: {_workspace},
-        onSelectionChanged: (value) => setState(() => _workspace = value.first),
+        selected: {_panel},
+        onSelectionChanged: (value) => setState(() => _panel = value.first),
       ),
     );
   }

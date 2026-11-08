@@ -2,7 +2,7 @@ import { authHeaders } from "../access-token.js";
 import { jsonRequest, requestJson } from "../api.js";
 import { escHtml } from "../format.js";
 
-const ROOT = "inputs/reflections";
+const ROOT = "reflections";
 const MAX_RECORD_MS = 5 * 60 * 1000;
 
 export function createReflectionsFeature({ state, actions }) {
@@ -25,7 +25,7 @@ export function createReflectionsFeature({ state, actions }) {
   let recordStream = null;
 
   function syncPreview() {
-    if (state.workspace !== "reflections" || !currentPath) {
+    if (state.panel !== "reflections" || !currentPath) {
       state.reflectionPreview = null;
       return;
     }
@@ -50,9 +50,9 @@ export function createReflectionsFeature({ state, actions }) {
     const { data } = await requestJson("/api/reflections?view=tree");
     tree = (data.tree || []).filter((node) => node.kind === "directory");
     renderFolders();
-      renderStage();
-      syncPreview();
-    }
+    renderStage();
+    syncPreview();
+  }
 
   const FOLDER_ICON = `<svg class="reflections-folder-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.2c0-.7.6-1.2 1.2-1.2h3.6l1.5 1.7h7.5c.7 0 1.2.6 1.2 1.2v8.4c0 .7-.6 1.2-1.2 1.2H3.7c-.7 0-1.2-.5-1.2-1.2V5.2Z"/></svg>`;
   const CHEVRON_ICON = `<svg class="reflections-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>`;
@@ -157,7 +157,7 @@ export function createReflectionsFeature({ state, actions }) {
 
   function renderStage() {
     const panel = document.getElementById("document-panel");
-    if (!panel || state.workspace !== "reflections") return;
+    if (!panel || state.panel !== "reflections") return;
     let stage = document.getElementById("reflections-stage");
     if (!stage) {
       stage = document.createElement("div");
@@ -335,7 +335,7 @@ export function createReflectionsFeature({ state, actions }) {
   function resolveMediaPath(notePath, src) {
     const normalized = String(src || "").replaceAll("\\", "/").trim();
     if (!normalized) return "";
-    if (normalized.startsWith("inputs/reflections/")) return normalized;
+    if (normalized.startsWith("reflections/")) return normalized;
     const base = noteDir(notePath);
     if (normalized.startsWith("./")) return `${base}${normalized.slice(2)}`;
     return `${base}${normalized}`;
@@ -1608,7 +1608,7 @@ export function createReflectionsFeature({ state, actions }) {
   }
 
   async function importFile() {
-    const sourcePath = window.prompt("要拆分的文件路径（相对数据目录，如 inputs/reflections/inbox/合集.txt）");
+    const sourcePath = window.prompt("要拆分的文件路径（相对数据目录，如 reflections/inbox/合集.txt）");
     if (!sourcePath || !sourcePath.trim()) return;
     const dry = await requestJson("/api/reflections/import", jsonRequest("POST", {
       sourcePath: sourcePath.trim(),
@@ -1659,38 +1659,17 @@ export function createReflectionsFeature({ state, actions }) {
     await loadTree();
   }
 
-  function applyWorkspaceChrome(next) {
-    document.body.classList.toggle("people-workspace", next === "people");
-    document.body.classList.toggle("reflections-workspace", next === "reflections");
-    document.getElementById("workspace-docs")?.classList.toggle("active", next === "docs");
-    document.getElementById("workspace-people")?.classList.toggle("active", next === "people");
-    document.getElementById("workspace-reflections")?.classList.toggle("active", next === "reflections");
-    const peopleBrowser = document.getElementById("people-browser");
-    if (peopleBrowser) peopleBrowser.hidden = next !== "people";
-    const reflectionsBrowser = document.getElementById("reflections-browser");
-    if (reflectionsBrowser) reflectionsBrowser.hidden = next !== "reflections";
-    if (next !== "people") document.getElementById("people-stage")?.remove();
-    if (next !== "reflections") document.getElementById("reflections-stage")?.remove();
-  }
-
-  function setWorkspace(next) {
-    void (async () => {
-      if (next !== "reflections" && !(await ensureSaved())) return;
-    state.workspace = next;
-    applyWorkspaceChrome(next);
-    if (next === "reflections") {
-      state.personThread = null;
-        void loadTree();
-    } else {
-      syncPreview();
-    }
-    remount();
-    actions.peopleRemount?.();
-    })();
+  /**
+   * 心得侧只负责「进来时加载树」。
+   * 真正的面板切换只有一个实现（people.js），离开心得前的 flush + 确认也在那里统一处理。
+   */
+  function setPanel(next) {
+    actions.setPanel?.(next);
+    if (next === "reflections") void loadTree();
   }
 
   function remount() {
-    if (state.workspace !== "reflections") {
+    if (state.panel !== "reflections") {
       syncPreview();
       return;
     }
@@ -1710,18 +1689,23 @@ export function createReflectionsFeature({ state, actions }) {
   }
 
   function bind() {
-    document.getElementById("workspace-reflections")?.addEventListener("click", () => setWorkspace("reflections"));
+    document.getElementById("panel-reflections")?.addEventListener("click", () => setPanel("reflections"));
+    // 对话入口（plan §10.1）：不新建会话、不切面板，只把焦点送到右栏输入框。
+    // 上下文由 `state.panel === "reflections"` + `reflectionPreview.previewPath` 自动带上。
+    document.getElementById("reflections-chat-open")?.addEventListener("click", () => {
+      actions.focusChat?.();
+    });
     window.addEventListener("beforeunload", (event) => {
-      if (!dirty || state.workspace !== "reflections") return;
+      if (!dirty || state.panel !== "reflections") return;
       event.preventDefault();
       event.returnValue = "";
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden" && state.workspace === "reflections") void flushAutosave();
+      if (document.visibilityState === "hidden" && state.panel === "reflections") void flushAutosave();
     });
   }
 
-  return { bind, remount, setWorkspace, applyWorkspaceChrome, canLeave, prepareLeave };
+  return { bind, remount, setPanel, canLeave, prepareLeave, reload: loadTree };
 }
 
 function groupNotes(notes) {

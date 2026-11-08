@@ -70,7 +70,19 @@ describe("config", () => {
       keepRecentRounds: 0,
     });
     expect(config.server.port).toBe(3000);
-    expect(config.fs.allowedDirs).toEqual(["inputs", "knowledge_base", "files"]);
+    // 新装默认就是三档 ACL：知识区只读、people/distill/pending/agents 可写。
+    expect(config.fs.policy).toEqual({
+      readable: ["reflections", "people", "knowledge_base", "distill", "pending", "agents"],
+      writable: ["people", "distill", "pending", "agents"],
+      denied: [
+        "conversations",
+        "logs",
+        "files/prompts",
+        "files/app_state.json",
+        "agents/main/AGENT.md",
+      ],
+    });
+    expect(config.fs.confirm).toBe("session");
     expect(config.tools.tavily).toMatchObject({
       baseUrl: "https://api.tavily.com",
       searchDepth: "basic",
@@ -183,7 +195,12 @@ describe("config", () => {
         port: 4000,
       },
       fs: {
-        allowedDirs: ["inputs", "files"],
+        // 旧字段：映射为下一个新字段被规范化，路径本身不做旧前缀双读。
+        policy: {
+          readable: ["reflections", "knowledge_base", "files"],
+          writable: ["people", "distill", "pending", "agents"],
+          denied: ["logs"],
+        },
         allowedFiles: ["memory.md", "notes.md"],
       },
       tools: {
@@ -205,8 +222,9 @@ describe("config", () => {
     expect(config.server.host).toBe("127.0.0.1");
     expect(config.server.accessToken).toBe("");
     expect(config.server.corsOrigins).toEqual([]);
-    expect(config.fs.allowedDirs).toEqual(["inputs", "files"]);
-    expect(config.fs.allowedFiles).toEqual(["memory.md", "notes.md"]);
+    expect(config.fs.policy?.readable).toEqual(["reflections", "knowledge_base", "files", "memory.md", "notes.md"]);
+    expect(config.fs.policy?.writable).toEqual(["people", "distill", "pending", "agents"]);
+    expect(config.fs.policy?.denied).toEqual(["logs"]);
     expect(config.tools.tavily.enabled).toBe(true);
     expect(config.tools.tavily.apiKey).toBe("tvly-key");
     expect(config.tools.tavily.maxResults).toBe(7);

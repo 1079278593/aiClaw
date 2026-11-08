@@ -54,6 +54,8 @@ export const ModelOptionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   modal: z.enum(["l", "vl"]).optional(),
+  /** 上下文窗口。未配置时退回 contextMaxTokens。 */
+  contextWindow: z.number().int().min(1000).optional(),
   thinking: z.array(ThinkingOptionSchema).optional(),
   thinkingOff: ThinkingParamsSchema.optional(),
   cost: CostConfigSchema.optional(),
@@ -74,9 +76,44 @@ export const ServerConfigSchema = z.object({
   corsOrigins: z.array(z.string()).default([]),
 });
 
+export const FS_CONFIRM_LEVELS = ["never", "session", "always"] as const;
+export type FSConfirmLevel = (typeof FS_CONFIRM_LEVELS)[number];
+
+/** 三档 ACL：denied 优先于 writable，writable 优先于 readable。 */
+export const FSPolicySchema = z.object({
+  /** 工具可读的目录前缀 / 精确文件。 */
+  readable: z.array(z.string()).default(["reflections", "people", "knowledge_base", "distill", "pending", "agents"]),
+  /** 工具可写的目录前缀 / 精确文件。 */
+  writable: z.array(z.string()).default(["people", "distill", "pending", "agents"]),
+  /** Agent 工具禁域（目录前缀或精确文件），优先级最高。 */
+  denied: z.array(z.string()).default([
+    "conversations",
+    "logs",
+    "files/prompts",
+    "files/app_state.json",
+    "agents/main/AGENT.md",
+  ]),
+});
+
+export const DEFAULT_FS_POLICY = {
+  readable: ["reflections", "people", "knowledge_base", "distill", "pending", "agents"],
+  writable: ["people", "distill", "pending", "agents"],
+  denied: [
+    "conversations",
+    "logs",
+    "files/prompts",
+    "files/app_state.json",
+    "agents/main/AGENT.md",
+  ],
+};
+
 export const FSConfigSchema = z.object({
-  allowedDirs: z.array(z.string()).default(["inputs", "knowledge_base", "files"]),
-  allowedFiles: z.array(z.string()).default([]),
+  /** 旧字段：存在时映射为 readable ∪ writable（仅配置字段兼容，不做路径兼容）。 */
+  allowedDirs: z.array(z.string()).optional(),
+  allowedFiles: z.array(z.string()).optional(),
+  policy: FSPolicySchema.optional(),
+  /** 授权分级：只影响「会话内一次授权」这一档，危险操作永远确认。缺省按 session。 */
+  confirm: z.enum(FS_CONFIRM_LEVELS).optional(),
 });
 
 export const DEFAULT_TAVILY_TOOL_CONFIG = {
@@ -152,8 +189,8 @@ export const DEFAULT_SERVER_CONFIG = {
 };
 
 export const DEFAULT_FS_CONFIG = {
-  allowedDirs: ["inputs", "knowledge_base", "files"],
-  allowedFiles: [],
+  policy: DEFAULT_FS_POLICY,
+  confirm: "session" as const,
 };
 
 export const DEFAULT_CONFIG = {
@@ -200,6 +237,9 @@ export const DEFAULT_CONFIG = {
   maxTokens: 16384,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
+  injectDistillMap: false,
+  autoRefreshDistill: false,
   maxToolCalls: 10,
   server: DEFAULT_SERVER_CONFIG,
   fs: DEFAULT_FS_CONFIG,
@@ -220,6 +260,24 @@ export const ConfigSchema = z.object({
   maxTokens: z.number().int().min(1).default(DEFAULT_CONFIG.maxTokens),
   contextMaxTokens: z.number().int().min(1000).default(DEFAULT_CONFIG.contextMaxTokens),
   contextMaxMessages: z.number().int().min(0).default(DEFAULT_CONFIG.contextMaxMessages),
+  /**
+   * 是否把 `reflections/_index.md` 注入系统块（plan §5.7）。默认关：
+   * 打开后模型能看到根索引，省一次 read；代价是每轮固定成本。
+   * 超过 1 KB 时**放弃注入**（不截断成半张地图），只记日志。
+   */
+  injectRootIndex: z.boolean().default(DEFAULT_CONFIG.injectRootIndex),
+  /**
+   * 是否把 `distill/meta/overview.md` 注入系统块（plan_distill §4）。默认关：
+   * 打开后模型知道有哪些摘要可用，省一次 list；代价是每轮固定成本。
+   * 与记忆共用 `MEMORY_TOKEN_MAX` 预算，超了**先丢地图**——它是加速层。
+   */
+  injectDistillMap: z.boolean().default(DEFAULT_CONFIG.injectDistillMap),
+  /**
+   * 启动时是否自动重算过期蒸馏（plan_distill §6）。默认关：后台重算会烧 token，
+   * 而「摘要变了但我没让你改」很难解释。打开后只处理 `stale`（来源确实改动过）
+   * 且刷新于 30 天内的摘要，单轮最多 `maxItems` 篇，失败只记日志。
+   */
+  autoRefreshDistill: z.boolean().default(DEFAULT_CONFIG.autoRefreshDistill),
   maxToolCalls: z.number().int().min(1).default(DEFAULT_CONFIG.maxToolCalls),
   server: ServerConfigSchema.optional().default(DEFAULT_CONFIG.server),
   fs: FSConfigSchema.optional().default(DEFAULT_CONFIG.fs),
@@ -247,6 +305,15 @@ export type ThinkingParams = z.infer<typeof ThinkingParamsSchema>;
 export type ProviderCredential = z.infer<typeof ProviderCredentialSchema>;
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 export type FSConfig = z.infer<typeof FSConfigSchema>;
+export type FSPolicy = z.infer<typeof FSPolicySchema>;
+
+/**
+ * 从配置读策略，缺省回退到默认三档。
+ * 配置加载后 `policy` 一定有值；这里兜底的是测试里手写的部分 Config 字面量。
+ */
+export function getFsPolicy(config: { fs?: FSConfig }): FSPolicy {
+  return config.fs?.policy ?? DEFAULT_FS_POLICY;
+}
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type TavilyToolConfig = z.infer<typeof TavilyToolConfigSchema>;
 export type TriliumToolConfig = z.infer<typeof TriliumToolConfigSchema>;

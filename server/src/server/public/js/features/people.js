@@ -12,11 +12,11 @@ export function createPeopleFeature({ state, actions }) {
   let note = false;
 
   function threadPath() {
-    return personId ? `inputs/people/${personId}` : "";
+    return personId ? `people/${personId}` : "";
   }
 
   function syncThread() {
-    if (state.workspace !== "people" || !personId) {
+    if (state.panel !== "people" || !personId) {
       state.personThread = null;
       const banner = document.getElementById("person-banner");
       if (banner) banner.hidden = true;
@@ -110,7 +110,7 @@ export function createPeopleFeature({ state, actions }) {
 
   function renderStage() {
     const panel = document.getElementById("document-panel");
-    if (!panel || state.workspace !== "people") return;
+    if (!panel || state.panel !== "people") return;
     let stage = document.getElementById("people-stage");
     if (!stage) {
       stage = document.createElement("div");
@@ -274,45 +274,52 @@ export function createPeopleFeature({ state, actions }) {
     else await openPerson(personId);
   }
 
-  function setWorkspace(next) {
+  /**
+   * 纯 DOM 表现：左栏面板高亮 + 各面板容器显隐 + 中间区 stage 清理。
+   * 只负责「显示哪个」，不加载数据、不动会话。
+   */
+  function applyPanelChrome(next) {
+    state.panel = next;
+    document.body.classList.toggle("people-panel", next === "people");
+    document.body.classList.toggle("reflections-panel", next === "reflections");
+    document.getElementById("panel-docs")?.classList.toggle("active", next === "docs");
+    document.getElementById("panel-people")?.classList.toggle("active", next === "people");
+    document.getElementById("panel-reflections")?.classList.toggle("active", next === "reflections");
+    const peopleBrowser = document.getElementById("people-browser");
+    if (peopleBrowser) peopleBrowser.hidden = next !== "people";
+    const reflectionsBrowser = document.getElementById("reflections-browser");
+    if (reflectionsBrowser) reflectionsBrowser.hidden = next !== "reflections";
+    // 「待应用」是心得面板内的覆盖层，离开心得就收起，避免挡住文档树。
+    if (next !== "reflections") {
+      const pendingPanel = document.getElementById("pending-panel");
+      if (pendingPanel) pendingPanel.hidden = true;
+    }
+    if (next !== "people") document.getElementById("people-stage")?.remove();
+    if (next !== "reflections") document.getElementById("reflections-stage")?.remove();
+    if (next !== "people" && next !== "reflections") state.reflectionPreview = null;
+  }
+
+  function setPanel(next) {
     void (async () => {
-      if (state.workspace === "reflections" && next !== "reflections") {
+      // 从心得离开要先落盘，避免未保存正文丢失
+      if (state.panel === "reflections" && next !== "reflections") {
         const ok = actions.prepareLeaveReflections
           ? await actions.prepareLeaveReflections()
           : !actions.canLeaveReflections || actions.canLeaveReflections();
         if (!ok) return;
       }
-      applyWorkspace(next);
+      applyPanelChrome(next);
+      if (next === "people") {
+        state.reflectionPreview = null;
+        void loadPeople();
+      }
+      remount();
+      actions.reflectionsRemount?.();
     })();
   }
 
-  function applyWorkspace(next) {
-    state.workspace = next;
-    document.body.classList.toggle("people-workspace", next === "people");
-    document.body.classList.toggle("reflections-workspace", next === "reflections");
-    document.getElementById("workspace-docs")?.classList.toggle("active", next === "docs");
-    document.getElementById("workspace-people")?.classList.toggle("active", next === "people");
-    document.getElementById("workspace-reflections")?.classList.toggle("active", next === "reflections");
-    const peopleBrowser = document.getElementById("people-browser");
-    if (peopleBrowser) peopleBrowser.hidden = next !== "people";
-    const reflectionsBrowser = document.getElementById("reflections-browser");
-    if (reflectionsBrowser) reflectionsBrowser.hidden = next !== "reflections";
-    if (next === "people") {
-      state.reflectionPreview = null;
-      void loadPeople();
-    } else {
-      document.getElementById("people-stage")?.remove();
-    }
-    if (next !== "reflections") {
-      document.getElementById("reflections-stage")?.remove();
-      state.reflectionPreview = null;
-    }
-    remount();
-    actions.reflectionsRemount?.();
-  }
-
   function remount() {
-    if (state.workspace !== "people") {
+    if (state.panel !== "people") {
       syncThread();
       return;
     }
@@ -331,14 +338,14 @@ export function createPeopleFeature({ state, actions }) {
   }
 
   function bind() {
-    document.getElementById("workspace-docs")?.addEventListener("click", () => setWorkspace("docs"));
-    document.getElementById("workspace-people")?.addEventListener("click", () => setWorkspace("people"));
+    document.getElementById("panel-docs")?.addEventListener("click", () => setPanel("docs"));
+    document.getElementById("panel-people")?.addEventListener("click", () => setPanel("people"));
     state.afterChat = () => {
-      if (state.workspace === "people" && personId) void openPerson(personId);
+      if (state.panel === "people" && personId) void openPerson(personId);
     };
   }
 
-  return { bind, remount };
+  return { bind, remount, setPanel };
 }
 
 function dayLabel(at) {

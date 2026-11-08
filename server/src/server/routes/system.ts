@@ -1,7 +1,7 @@
 import { readAccountSettings, updateAccountSettings } from "../../config/account-settings.js";
 import { rotateUser } from "../../tenant/users.js";
 import { getAvailableProviders, type Config, type ProviderName } from "../../config/index.js";
-import { loadAppState } from "../../app-state/index.js";
+import { loadAppState, setReflectionsSession } from "../../app-state/index.js";
 import { authIsRequired } from "../../tenant/access.js";
 import { currentTenant } from "../../tenant/store.js";
 import { flushUsage, getDailyStats, getUsageStats } from "../services/usage-store.js";
@@ -71,6 +71,24 @@ export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, 
   }
   if (url.pathname === "/api/app-state" && req.method === "GET") {
     sendJson(res, await loadAppState());
+    return true;
+  }
+  // Mobile "reflections chat" session binding (plan_reflections_chat.md §7.4).
+  // Idempotent by construction: `setReflectionsSession` never rewrites on the same value.
+  if (url.pathname === "/api/app-state/reflections-session" && req.method === "POST") {
+    try {
+      const body = await readJsonBody<{ sessionId?: string }>(req);
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!sessionId) {
+        sendJson(res, { error: "sessionId is required" }, 400);
+        return true;
+      }
+      await setReflectionsSession(sessionId);
+      sendJson(res, await loadAppState());
+    } catch (error) {
+      const message = error instanceof SyntaxError ? "请求不是 JSON" : (error as Error).message;
+      sendJson(res, { error: message }, 400);
+    }
     return true;
   }
   if (url.pathname === "/api/usage/flush" && req.method === "POST") {

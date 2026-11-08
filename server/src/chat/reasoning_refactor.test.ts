@@ -60,9 +60,12 @@ const mockConfig: Config = {
   maxTokens: 4096,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
+      injectDistillMap: false,
+      autoRefreshDistill: false,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1", accessToken: "", corsOrigins: [] },
-  fs: { allowedDirs: ["inputs", "knowledge_base", "files"], allowedFiles: ["memory.md"] },
+  fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
   tools: {
     tavily: {
       enabled: false,

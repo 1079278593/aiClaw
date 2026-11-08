@@ -28,10 +28,20 @@ export async function setupTestDir(testName: string): Promise<string> {
 }
 
 /**
- * Cleanup a test data directory
+ * Cleanup a test data directory.
  *
- * @param testDir - The test directory path to cleanup
+ * 后台任务/websocket 收尾可能仍在创建默认目录，`rm` 偶发 ENOTEMPTY；
+ * 这里重试几次，避免把「清理竞态」误报成测试失败。
  */
 export async function cleanupTestDir(testDir: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
   await rm(testDir, { recursive: true, force: true });
 }

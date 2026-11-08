@@ -81,19 +81,44 @@ describe("people", () => {
     await expect(createPerson("小宁", dir)).resolves.toMatchObject({ created: false, person: { id: person.id } });
   });
 
-  it("splits the archive marker without sending a partial marker", () => {
-    expect(visibleBeforeMarker("你好<<<档案")).toBe("你好");
+  it("13. 空 digest 追加是 no-op；25. 档案砍半被拒绝，summary 含「精简」时放行", async () => {
+    const dir = await setupTestDir("people-guards");
+    const { person } = await createPerson("阿宁", dir);
+    const { appendDigest } = await import("./store.js");
+    const before = await getPersonRecord(person.id, dir);
+
+    // 空/纯空白追加不写盘。
+    await appendDigest(person.id, "   \n  ", new Date().toISOString(), dir);
+    expect((await getPersonRecord(person.id, dir)).digest).toBe(before.digest);
+
+    // 构造一个长档案（40 个条目），再砍到只有标题骨架。
+    const longProfile = before.profile.replace(
+      "## 个人资料\n\n无",
+      `## 个人资料\n\n${Array.from({ length: 40 }, (_, i) => `- 事实${i}`).join("\n")}`,
+    );
+    await saveProfileDocument(person.id, longProfile, dir);
+    const shrunk = longProfile.replace(/\n- 事实\d+/g, "");
+    await expect(saveProfileDocument(person.id, shrunk, dir)).rejects.toThrow(/精简/);
+    // 没写进去。
+    expect((await getPersonRecord(person.id, dir)).profile).toContain("事实19");
+
+    // summary 显式写「精简」时放行。
+    await saveProfileDocument(person.id, shrunk, dir, { summary: "用户要求精简档案" });
+    expect((await getPersonRecord(person.id, dir)).profile).not.toContain("事实19");
+  });
+
+  it("splits the archive marker without sending a partial marker", () => {    expect(visibleBeforeMarker("你好<<<档案")).toBe("你好");
     expect(visibleBeforeMarker("你好<<<档案>>>档案正文")).toBe("你好");
     expect(splitOrganizeReply("  新的一段  \n<<<档案>>>\n## 基本信息")).toEqual({
       brief: "新的一段",
       profile: "## 基本信息",
     });
-    expect(personIdFromThreadPath("inputs/people/abc123")).toBe("abc123");
+    expect(personIdFromThreadPath("people/abc123")).toBe("abc123");
     expect(profileHeadingsComplete("无")).toBe(false);
     expect(parseRecognition('{"error":"group"}')).toEqual({ error: "group" });
     expect(parseRecognition('{"lines":[{"speaker":"me","text":"在"}]}')).toEqual({ lines: [{ speaker: "me", text: "在" }] });
     const suffix = buildPersonContextSuffix({ id: "abc123", profile: "档案" });
-    expect(suffix).toContain("历史简报路径：inputs/people/abc123/digest.md");
+    expect(suffix).toContain("历史简报路径：people/abc123/digest.md");
     expect(suffix).not.toContain("不一定与当前对话直接相关");
   });
 });

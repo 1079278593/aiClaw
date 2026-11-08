@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import { BRAND_NAME } from "../brand.js";
 import type { Config } from "../config/index.js";
 import type { getLogger } from "../logger/index.js";
-import { setLastActiveSession } from "../app-state/index.js";
+import { isReflectionsSession, loadAppState, setLastActiveSession } from "../app-state/index.js";
 import { loadSession } from "../session/index.js";
 import { processChatMessage, cancelChat } from "./chat-handler.js";
 import type { Client, ClientMessage } from "./protocol.js";
@@ -45,7 +45,13 @@ export function handleWebSocketConnection(
     }
     scope = identity;
     client.tenantId = identity.id;
-    activeConfig = await loadConfigWithoutApiKey(identity.base);
+    try {
+      activeConfig = await loadConfigWithoutApiKey(identity.base);
+    } catch {
+      // 数据目录正在被并发清理（测试）或删除时，不把连接卡死在未鉴权状态。
+      ws.close(4401, "Unauthorized");
+      return false;
+    }
     activeConfig.server = config.server;
     enter(() => initTools(activeConfig));
     authenticated = true;
@@ -118,7 +124,12 @@ export function handleWebSocketConnection(
         client.sessionId = message.sessionId;
         try {
           const session = await loadSession(message.sessionId);
-          await setLastActiveSession(message.sessionId);
+          // The mobile reflections chat owns its own session id; joining it must
+          // NOT move the "resume where you left off" pointer (plan §7.4 step 3).
+          const appState = await loadAppState();
+          if (!isReflectionsSession(appState, message.sessionId)) {
+            await setLastActiveSession(message.sessionId);
+          }
           sendToClient(client, {
             type: "sessionLoaded",
             requestId: message.requestId,

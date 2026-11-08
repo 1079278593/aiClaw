@@ -6,6 +6,7 @@ import '../src/app_controller.dart';
 import '../src/reflection_groups.dart';
 import 'reflection_list_rows.dart';
 import 'reflection_page.dart';
+import 'reflections_chat_sheet.dart';
 
 class _Node {
   _Node.fromJson(Map<String, Object?> json)
@@ -57,7 +58,7 @@ class _Node {
 }
 
 String _folderKey(String path) {
-  const root = 'inputs/reflections';
+  const root = 'reflections';
   if (path == root || path.isEmpty) return '';
   if (path.startsWith('$root/')) return path.substring(root.length + 1);
   return path;
@@ -185,12 +186,22 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
         ];
         _loading = false;
       });
+      await _refreshBadge();
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.message;
         _loading = false;
       });
+    }
+  }
+
+  /// 角标失败不影响列表：静默吞掉，避免首页一进来就报错。
+  Future<void> _refreshBadge() async {
+    try {
+      await widget.controller.refreshPendingBadge();
+    } on ApiException {
+      // ignore
     }
   }
 
@@ -284,19 +295,46 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(child: Text(_error!))
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                children: [
-                  if (_roots.isEmpty) const ListTile(title: Text('还没有文件夹')),
-                  for (final folder in _roots) _folderTile(folder, 0),
-                ],
-              ),
-            ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(child: Text(_error!))
+                    : RefreshIndicator(
+                        onRefresh: _load,
+                        child: ListView(
+                          padding: const EdgeInsets.only(bottom: reflectionsEntryReserve),
+                          children: [
+                            if (_roots.isEmpty) const ListTile(title: Text('还没有文件夹')),
+                            for (final folder in _roots) _folderTile(folder, 0),
+                          ],
+                        ),
+                      ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: reflectionsEntryBottomInset,
+            child: _chatEntryButton(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chatEntryButton() {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final badge = widget.controller.pendingBadge;
+        return FilledButton.tonalIcon(
+          onPressed: () => showReflectionsChatSheet(context, widget.controller),
+          icon: const Icon(Icons.auto_awesome, size: 18),
+          label: Text(badge > 0 ? '心得对话 · 待应用 $badge' : '心得对话'),
+        );
+      },
     );
   }
 

@@ -19,6 +19,7 @@ class ChatPage extends StatefulWidget {
     this.onHistory,
     this.consult,
     this.onOrganizeSent,
+    this.title,
   });
   final AppController controller;
   final String sessionId;
@@ -26,6 +27,8 @@ class ChatPage extends StatefulWidget {
   final VoidCallback? onHistory;
   final PersonConsult? consult;
   final VoidCallback? onOrganizeSent;
+  /// 覆盖标题（心得弹层用「心得对话」）。
+  final String? title;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -76,7 +79,7 @@ class _ChatPageState extends State<ChatPage> {
         return Scaffold(
           appBar: AppBar(
             automaticallyImplyLeading: !widget.embedded,
-            title: Text(runtime.title?.isNotEmpty == true ? runtime.title! : '对话'),
+            title: Text(widget.title ?? (runtime.title?.isNotEmpty == true ? runtime.title! : '对话')),
             actions: [
               if (widget.onHistory != null)
                 IconButton(onPressed: widget.onHistory, icon: const Icon(Icons.history), tooltip: '历史会话'),

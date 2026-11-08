@@ -19,7 +19,7 @@
   <link rel="stylesheet" href="/styles/chat.css">
   <link rel="stylesheet" href="/styles/overlays.css">
   <link rel="stylesheet" href="/styles/product.css">
-  <link rel="stylesheet" href="/styles/workspace.css">
+  <link rel="stylesheet" href="/styles/shell.css">
 </head>
 <body>
 
@@ -33,10 +33,10 @@
       <i data-lucide="panel-left-close"></i>
     </button>
   </div>
-  <div id="workspace-switch" role="tablist" aria-label="工作区">
-    <button id="workspace-docs" type="button" class="active" role="tab">文档</button>
-    <button id="workspace-people" type="button" role="tab">人物</button>
-    <button id="workspace-reflections" type="button" role="tab">心得</button>
+  <div id="panel-switch" role="tablist" aria-label="左侧面板">
+    <button id="panel-docs" type="button" class="active" role="tab">文档</button>
+    <button id="panel-people" type="button" role="tab">人物</button>
+    <button id="panel-reflections" type="button" role="tab">心得</button>
   </div>
   <div id="file-explorer">
     <div id="file-root-tabs" role="tablist" aria-label="文档根目录"></div>
@@ -48,6 +48,27 @@
     <div id="reflections-browser" hidden>
       <div id="reflections-toolbar"></div>
       <div id="reflections-list"></div>
+      <div class="reflections-footer">
+        <button id="reflections-chat-open" class="reflections-chat-entry" type="button" title="与 AI 聊这些心得">
+          <i data-lucide="message-circle"></i>
+          <span>对话</span>
+        </button>
+        <button id="pending-open" class="reflections-chat-entry" type="button" title="待应用">
+          <i data-lucide="sparkles"></i>
+          <span>待应用</span>
+          <span id="pending-badge" class="reflections-chat-badge" hidden></span>
+        </button>
+      </div>
+    </div>
+    <div id="pending-panel" class="pending-panel" hidden>
+      <div class="pending-panel-head">
+        <strong>待应用的改动</strong>
+        <button id="pending-close" class="icon-button" type="button" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div id="pending-list" class="pending-list"></div>
+      <div id="pending-detail" class="pending-detail"></div>
     </div>
   </div>
   <div id="sidebar-settings">
@@ -91,6 +112,7 @@
         </label>
       </div>
       <button type="button" id="account-settings-btn" class="settings-action">服务与模型</button>
+      <button type="button" id="rebuild-index-btn" class="settings-action" title="对心得与知识库逐层重写 _index.md（一次性动作）">重建索引</button>
       <button type="button" id="logout-btn" class="settings-logout" hidden>退出并清除令牌</button>
       <div id="settings-version" class="settings-version">版本</div>
     </div>
@@ -264,14 +286,14 @@
     <div class="panel-scroll-body help-content">
       <h2>面板介绍</h2>
       <ul>
-        <li><strong>左侧文件栏</strong>：顶部一行是 <code>knowledge_base</code>、<code>inputs</code> 与 <code>trilium</code> 三个根目录。选中后下方显示目录树；点击目录可展开/收起，子目录自动缩进。点击文件在中间打开阅读。</li>
+        <li><strong>左侧文件栏</strong>：顶部一行是 <code>knowledge_base</code> 与 <code>trilium</code> 两个根目录；心得、人物各自在顶部面板里。选中后下方显示目录树；点击目录可展开/收起，子目录自动缩进。点击文件在中间打开阅读。</li>
         <li><strong>中间阅读区</strong>：显示左侧打开的文档，可多标签切换；默认只读预览，点击“编辑”进入编辑模式（支持 Markdown 预览 / 图片查看）。</li>
         <li><strong>右侧聊天栏</strong>：顶栏第一行是＋新建对话按钮，下方为当前会话的对话与输入框。点击顶栏历史按钮可打开会话列表，切换/重命名/删除历史对话。</li>
       </ul>
 
       <h2>一般流程</h2>
       <ol>
-        <li>外部文件或图片放入<code>${AICLAW_DATA_DIR}/inputs/</code>中，或提供网址供AI读取</li>
+        <li>外部文件或图片放入<code>${AICLAW_DATA_DIR}/</code>对应的知识库目录中，或提供网址供AI读取</li>
         <li>在左侧选择文件，在中间阅读区划选关键内容（或直接基于打开的文档）</li>
         <li>在右侧与AI聊天总结该文档主要内容</li>
         <li>要求AI在某个现有知识库建立新文件；或要求AI建立新的知识库，并写入该新文件。</li>
@@ -285,7 +307,7 @@
 
       <h2>左侧文件栏</h2>
       <h3>目录树</h3>
-      <p>顶部一行是 <code>knowledge_base</code>、<code>inputs</code>、<code>trilium（只读）</code> 三个根目录，点击切换当前浏览的根。下方是目录树：点目录行可展开/收起，再嵌套的子目录自动缩进；点击文件行在中间阅读区打开。右上角刷新按钮用于重新拉取目录，AI 通过工具写入/删除文件后列表也会自动刷新。</p>
+      <p>顶部一行是 <code>knowledge_base</code>、<code>trilium（只读）</code> 两个根目录，点击切换当前浏览的根。下方是目录树：点目录行可展开/收起，再嵌套的子目录自动缩进；点击文件行在中间阅读区打开。右上角刷新按钮用于重新拉取目录，AI 通过工具写入/删除文件后列表也会自动刷新。</p>
       <h3>文件栏宽度</h3>
       <p>文件栏可通过左边缘按钮收起/展开，或拖拽右边缘的分隔条调整宽度。</p>
       <h3>会话管理</h3>

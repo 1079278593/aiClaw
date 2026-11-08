@@ -54,9 +54,12 @@ const mockConfig: Config = {
   maxTokens: 4096,
   contextMaxTokens: 100_000,
   contextMaxMessages: 0,
+  injectRootIndex: false,
+      injectDistillMap: false,
+      autoRefreshDistill: false,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1", accessToken: "", corsOrigins: [] },
-  fs: { allowedDirs: ["inputs", "knowledge_base", "files"], allowedFiles: ["memory.md"] },
+  fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
   tools: {
     tavily: {
       enabled: false,
@@ -203,10 +206,11 @@ describe("server", () => {
     testDir = await setupTestDir("server-test");
     const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8BvlsAAAAASUVORK5CYII=";
 
-    await mkdir(path.join(testDir, "inputs"), { recursive: true });
     await mkdir(path.join(testDir, "files"), { recursive: true });
-    await writeFile(path.join(testDir, "inputs", "sample.png"), Buffer.from(pngBase64, "base64"));
-    await writeFile(path.join(testDir, "inputs", "notes.md"), "# Notes\n", "utf-8");
+    // 文档浏览器只服务 knowledge_base：心得与人物不在文档面板出现。
+    await mkdir(path.join(testDir, "knowledge_base"), { recursive: true });
+    await writeFile(path.join(testDir, "knowledge_base", "sample.png"), Buffer.from(pngBase64, "base64"));
+    await writeFile(path.join(testDir, "knowledge_base", "notes.md"), "# Notes\n", "utf-8");
     await writeFile(
       path.join(testDir, "files", "commands.md"),
       [
@@ -316,7 +320,7 @@ describe("server", () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/files?q=sample`);
     expect(res.status).toBe(200);
     const data = await res.json() as { files: Array<{ path: string; source: string }> };
-    expect(data.files).toEqual([{ path: "inputs/sample.png", source: "inputs" }]);
+    expect(data.files).toEqual([{ path: "knowledge_base/sample.png", source: "knowledge_base" }]);
   });
 
   it("lists document tree entries for allowed roots", async () => {
@@ -332,21 +336,21 @@ describe("server", () => {
   });
 
   it("loads document content for text files", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=inputs/notes.md`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=knowledge_base/notes.md`);
     expect(res.status).toBe(200);
     const data = await res.json() as { path: string; content: string; supported: boolean };
-    expect(data.path).toBe("inputs/notes.md");
+    expect(data.path).toBe("knowledge_base/notes.md");
     expect(data.supported).toBe(true);
     expect(data.content).toContain("# Notes");
   });
 
   it("returns 404 with a friendly message when the document was deleted", async () => {
     // 模拟模型执行 delete 工具后前端刷新：文件已不存在，不应返回原始 ENOENT
-    const doomedPath = path.join(testDir, "inputs", "doomed.md");
+    const doomedPath = path.join(testDir, "knowledge_base", "doomed.md");
     await writeFile(doomedPath, "# Doomed\n", "utf-8");
     await unlink(doomedPath);
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=inputs/doomed.md`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=knowledge_base/doomed.md`);
     expect(res.status).toBe(404);
     const data = await res.json() as { error: string };
     expect(data.error).toBe("文件不存在或已被删除");
@@ -354,10 +358,10 @@ describe("server", () => {
   });
 
   it("loads document content for image files", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=inputs/sample.png`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/documents/content?path=knowledge_base/sample.png`);
     expect(res.status).toBe(200);
     const data = await res.json() as { path: string; supported: boolean; kind: string; content: string };
-    expect(data.path).toBe("inputs/sample.png");
+    expect(data.path).toBe("knowledge_base/sample.png");
     expect(data.supported).toBe(true);
     expect(data.kind).toBe("image");
     expect(data.content).toMatch(/^data:image\/png;base64,/);
@@ -567,8 +571,59 @@ describe("server", () => {
     expect(appState.lastActiveSessionId).toBe(session.id);
   });
 
-  it("exposes authRequired on public health", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/health`);
+  it("keeps the reflections session out of lastActiveSessionId and the chat list", async () => {
+    // 聊天会话先成为恢复点。
+    const chatRes = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Chat" }),
+    });
+    const chat = (await chatRes.json() as { session: { id: string } }).session;
+    const reflectionsRes = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Reflections" }),
+    });
+    const reflections = (await reflectionsRes.json() as { session: { id: string } }).session;
+
+    const { ws, recv } = await connectWs(port);
+    await recv();
+    ws.send(JSON.stringify({ type: "joinSession", sessionId: chat.id, requestId: "chat-join" }));
+    await recv();
+    ws.close();
+
+    // 登记心得会话后 join 它：不能顶掉聊天恢复点。
+    const bindRes = await fetch(`http://127.0.0.1:${port}/api/app-state/reflections-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: reflections.id }),
+    });
+    expect(bindRes.status).toBe(200);
+    expect((await bindRes.json() as { reflectionsSessionId?: string }).reflectionsSessionId).toBe(reflections.id);
+
+    const ws2 = await connectWs(port);
+    await ws2.recv();
+    ws2.ws.send(JSON.stringify({ type: "joinSession", sessionId: reflections.id, requestId: "reflections-join" }));
+    const loaded = await ws2.recv() as { type: string; session: { id: string } };
+    expect(loaded.type).toBe("sessionLoaded");
+    expect(loaded.session.id).toBe(reflections.id);
+    ws2.ws.close();
+
+    const appState = await (await fetch(`http://127.0.0.1:${port}/api/app-state`)).json() as {
+      lastActiveSessionId?: string;
+      reflectionsSessionId?: string;
+    };
+    expect(appState.lastActiveSessionId).toBe(chat.id);
+    expect(appState.reflectionsSessionId).toBe(reflections.id);
+
+    const list = await (await fetch(`http://127.0.0.1:${port}/api/sessions`)).json() as {
+      sessions: Array<{ id: string }>;
+    };
+    expect(list.sessions.some((session) => session.id === reflections.id)).toBe(false);
+    expect(list.sessions.some((session) => session.id === chat.id)).toBe(true);
+  });
+
+  it("exposes authRequired on public health", async () => {    const res = await fetch(`http://127.0.0.1:${port}/health`);
     const data = await res.json() as { status: string; authRequired: boolean; version: string; commit: string };
     expect(res.status).toBe(200);
     expect(data.status).toBe("ok");

@@ -352,7 +352,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
   String _resolveMediaPath(String src) {
     final normalized = src.replaceAll('\\', '/').trim();
     if (normalized.isEmpty || _path.isEmpty) return '';
-    if (normalized.startsWith('inputs/reflections/')) return normalized;
+    if (normalized.startsWith('reflections/')) return normalized;
     final slash = _path.lastIndexOf('/');
     final dir = slash == -1 ? '' : _path.substring(0, slash + 1);
     if (normalized.startsWith('./')) return '$dir${normalized.substring(2)}';

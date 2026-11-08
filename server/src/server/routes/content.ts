@@ -37,13 +37,13 @@ export const handleContentRoutes: RouteHandler = async ({ req, res, url, config 
   }
   if (url.pathname === "/api/documents/content" && req.method === "PUT") {
     try {
-      const data = await readJsonBody<{ path?: string; content?: string }>(req);
+      const data = await readJsonBody<{ path?: string; content?: string; summary?: string }>(req);
       if (!data.path) {
         sendJson(res, { error: "Missing document path" }, 400);
         return true;
       }
       const personId = personIdFromProfilePath(data.path);
-      if (personId) await saveProfileDocument(personId, data.content ?? "");
+      if (personId) await saveProfileDocument(personId, data.content ?? "", undefined, { summary: data.summary });
       else await writeDocBrowserFile(data.path, data.content ?? "");
       sendJson(res, { ok: true });
     } catch (error) {

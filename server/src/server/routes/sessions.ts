@@ -1,4 +1,5 @@
 import { compactSession } from "../../chat/compaction.js";
+import { loadAppState } from "../../app-state/index.js";
 import { createSession, deleteSession, listSessions, loadSession, renameSession, truncateSession } from "../../session/index.js";
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson, toSessionMessage } from "../http-types.js";
@@ -6,7 +7,11 @@ import { appendUsageRecord } from "../services/usage-store.js";
 
 export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config, logger, broadcast }) => {
   if (url.pathname === "/api/sessions" && req.method === "GET") {
-    sendJson(res, { sessions: await listSessions() });
+    const appState = await loadAppState();
+    // The reflections chat session is mobile-internal: keep it out of the chat list
+    // (plan_reflections_chat.md §7.4 step 4).
+    const sessions = (await listSessions()).filter((s) => s.id !== appState.reflectionsSessionId);
+    sendJson(res, { sessions });
     return true;
   }
   if (url.pathname === "/api/sessions" && req.method === "POST") {
@@ -56,7 +61,12 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
       const result = await compactSession(compactMatch[1], config, logger, keepRecentRounds);
       if (result.usage) await appendUsageRecord(result.usage);
       broadcast(toSessionMessage(await loadSession(compactMatch[1])));
-      sendJson(res, { ok: true, archivedAs: result.archivedAs });
+      sendJson(res, {
+        ok: true,
+        archivedAs: result.archivedAs,
+        constraintsExtracted: result.constraintsExtracted === true,
+        constraintCount: result.constraints?.length ?? 0,
+      });
     } catch (error) {
       const message = (error as Error).message;
       const isBadRequest = message.includes("fewer than") || message.includes("Compaction not needed");
