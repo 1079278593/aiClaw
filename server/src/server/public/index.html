@@ -112,6 +112,7 @@
         </label>
       </div>
       <button type="button" id="account-settings-btn" class="settings-action">服务与模型</button>
+      <button type="button" id="context-settings-btn" class="settings-action" title="查看并编辑每轮对话固定注入的内容块">上下文来源</button>
       <button type="button" id="rebuild-index-btn" class="settings-action" title="对心得与知识库逐层重写 _index.md（一次性动作）">重建索引</button>
       <button type="button" id="logout-btn" class="settings-logout" hidden>退出并清除令牌</button>
       <div id="settings-version" class="settings-version">版本</div>
@@ -443,6 +444,37 @@
           <input id="account-rotate-token" type="text" readonly>
           <button id="account-rotate-copy" type="button">复制</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Context Sources Modal ===== -->
+<div id="context-modal" role="dialog" aria-modal="true" aria-labelledby="context-panel-title">
+  <div id="context-panel">
+    <div id="context-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="layers"></i></span>
+        <span class="account-title-text">
+          <strong id="context-panel-title">上下文来源</strong>
+          <span id="context-panel-subtitle"></span>
+        </span>
+      </div>
+      <button id="context-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-scroll-body">
+      <p class="account-note">
+        这里列出<strong>每次对话请求都会带上</strong>的内容块。改动只有在点击底部「确认修改」后才写入磁盘，
+        并在<strong>下一条消息</strong>生效（每轮都会重新读取，无需重启）。
+      </p>
+      <div id="context-summary" class="context-summary"></div>
+      <div id="context-list" class="context-list"></div>
+      <p id="context-status" class="account-status"></p>
+      <div class="context-actions">
+        <button id="context-reload" type="button" class="context-secondary">放弃改动</button>
+        <button id="context-save" type="button" disabled>确认修改</button>
       </div>
     </div>
   </div>

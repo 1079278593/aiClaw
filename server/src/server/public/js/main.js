@@ -2,6 +2,7 @@ import * as documents from "./features/documents.js";
 import { closeKnowledgeModal } from "./features/knowledge.js";
 import { closeUsageModal } from "./features/usage.js";
 import { initAccountSettings } from "./features/account-settings.js";
+import { initContextSources } from "./features/context-sources.js";
 import { initSettings } from "./features/settings.js";
 import { closeGitSyncModal } from "./features/git-sync.js";
 import { createChatFeature } from "./features/chat.js";
@@ -123,6 +124,7 @@ function bindGlobalEvents() {
 async function boot() {
   initSettings();
   initAccountSettings();
+  initContextSources();
   documents.configureDocuments({
     showError: actions.showError,
   });
