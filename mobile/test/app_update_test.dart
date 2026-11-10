@@ -143,7 +143,8 @@ void main() {
       expect(info, isNotNull);
       expect(info!.build, '13');
       expect(info.canInstallDirectly, isTrue);
-      expect(info.launchUrl, startsWith('itms-services://'));
+      // 已经是 itms-services 的原样保留。
+      expect(info.installTarget, 'itms-services://?action=download-manifest&url=https://x/y.plist');
       expect(formatBytes(info.sizeBytes), '8.6 MB');
     });
 
@@ -152,7 +153,28 @@ void main() {
       expect(AppUpdateInfo.tryParse('nope'), isNull);
     });
 
-    test('没有安装链接时保留更新页作为兜底', () {
+    test('fir 的 installUrl 是 manifest plist，必须包成 itms-services', () {
+      // 这是线上真实返回：Content-Type 是 application/x-plist。
+      // 直接打开只会让 Safari 显示 XML 或下载文件，不会安装。
+      final info = AppUpdateInfo.tryParse({
+        'platform': 'ios',
+        'configured': true,
+        'available': true,
+        'build': '14',
+        'installUrl': 'https://download.appmeta.cn/apps/abc/install?download_token=tok&source=update',
+      });
+      final target = info!.installTarget!;
+      expect(target, startsWith('itms-services://?action=download-manifest&url='));
+      // 原始地址必须被 URL 编码后作为参数，否则 & 会截断。
+      expect(target, contains(Uri.encodeComponent('https://download.appmeta.cn/apps/abc/install')));
+      expect(Uri.parse(target).queryParameters['action'], 'download-manifest');
+      expect(
+        Uri.parse(target).queryParameters['url'],
+        'https://download.appmeta.cn/apps/abc/install?download_token=tok&source=update',
+      );
+    });
+
+    test('只有网页短链时不可安装，绝不退回下载页', () {
       final info = AppUpdateInfo.tryParse({
         'platform': 'ios',
         'configured': true,
@@ -160,8 +182,11 @@ void main() {
         'build': '13',
         'updateUrl': 'http://fir.xcxwo.com/abc',
       });
+      // 网页短链点了只会下载 ipa，留下管不到的文件——所以不给装。
       expect(info!.canInstallDirectly, isFalse);
-      expect(info.launchUrl, 'http://fir.xcxwo.com/abc');
+      expect(info.installTarget, isNull);
+      // 但地址仍保留，仅供展示/兜底文案使用。
+      expect(info.webPageUrl, 'http://fir.xcxwo.com/abc');
     });
   });
 }

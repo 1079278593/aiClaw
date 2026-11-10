@@ -145,11 +145,10 @@ export async function fetchAppUpdate(
     build,
     ...(typeof payload.changelog === "string" && payload.changelog ? { changelog: payload.changelog } : {}),
     ...(updatedAt ? { updatedAt } : {}),
-    // 两个链接可能只出现一个：installUrl 能直接装，updateUrl 只是网页。
-    // 优先给能装的，缺失时退回短链，由客户端按「能否直接安装」决定文案。
+    // 两个链接可能只出现一个：installUrl 是 manifest plist（能装），
+    // updateUrl 只是网页短链（点了只会下载，留下管不到的 ipa）。
     ...(installUrl ? { installUrl } : {}),
-    ...(!installUrl && updateUrl ? { updateUrl } : {}),
-    ...(updateUrl && installUrl ? { updateUrl } : {}),
+    ...(updateUrl ? { updateUrl } : {}),
     ...(sizeBytes !== undefined ? { sizeBytes } : {}),
   };
 }

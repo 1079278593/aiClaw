@@ -105,12 +105,27 @@ class _UpdateTileState extends State<UpdateTile> {
                 Text('发布于 ${info.updatedAt!.replaceAll('T', ' ').split('.').first}',
                     style: Theme.of(context).textTheme.bodySmall),
               ],
+              const SizedBox(height: 12),
+              // 说清楚装的是什么、会覆盖谁、不留文件。
+              // Adhoc 覆盖安装是原地替换，用户需要知道这一点。
+              Text(
+                info.canInstallDirectly
+                    ? '点「立即安装」后由系统接管：会直接覆盖当前版本，不经过浏览器，也不在「文件」里留下安装包。'
+                    : '这次没有可直接安装的地址，无法在 App 内完成更新。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop('later'), child: const Text('稍后')),
-          FilledButton(onPressed: () => Navigator.of(context).pop('install'), child: const Text('立即安装')),
+          FilledButton(
+            // 没有可安装地址时禁用按钮，而不是让它点了报错。
+            onPressed: info.canInstallDirectly
+                ? () => Navigator.of(context).pop('install')
+                : null,
+            child: const Text('立即安装'),
+          ),
         ],
       ),
     );
@@ -119,11 +134,13 @@ class _UpdateTileState extends State<UpdateTile> {
   }
 
   Future<void> _launch(AppUpdateInfo info) async {
-    final target = info.launchUrl;
+    // 只走安装路径。绝不用 web 页兜底——那会让用户点进一个下载页，
+    // 结果反而在「文件」里留下一份管不到的 ipa。
+    final target = info.installTarget;
     if (target == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('服务端没有返回安装链接')),
+        const SnackBar(content: Text('服务端没有返回可直接安装的地址')),
       );
       return;
     }
@@ -134,12 +151,12 @@ class _UpdateTileState extends State<UpdateTile> {
       return;
     }
 
-    // itms-services 必须用 externalApplication，让系统接手；
-    // 用 inApp 会因为没有对应 web 处理器而失败。
+    // 必须是 externalApplication：itms-services 要由系统安装器接手，
+    // inApp 模式找不到处理器会直接失败。
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法打开安装链接，请复制到 Safari 中打开')),
+        const SnackBar(content: Text('无法唤起安装，请检查是否为企业/Adhoc 签名的包')),
       );
     }
   }

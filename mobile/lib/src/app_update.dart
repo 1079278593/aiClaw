@@ -45,21 +45,34 @@ class AppUpdateInfo {
   /// 未配置或查不到时的说明，可直接展示。
   final String? reason;
 
-  /// 能否点一下就装：只有 `itms-services` / 直链安装才算。
-  /// 单纯的更新网页短链需要用户自己在浏览器里操作，属于「查看」而非「安装」。
-  bool get canInstallDirectly {
-    final url = installUrl;
-    if (url == null || url.isEmpty) return false;
-    return url.startsWith('itms-services://') || url.startsWith('https://') || url.startsWith('http://');
+  /// 能否点一下就装。
+  ///
+  /// 判据不是「是不是 https」——fir 给的 `installUrl` 正是 https，
+  /// 但它返回的是 **manifest plist**（`Content-Type: application/x-plist`），
+  /// 直接打开只会让 Safari 把 XML 显示出来或当成文件下载。
+  /// 必须先包成 `itms-services://?action=download-manifest&url=…` 才有安装效果。
+  bool get canInstallDirectly => installTarget != null;
+
+  /// 真正该交给系统的安装 URL。
+  ///
+  /// - 已经是 `itms-services://` 的，原样返回；
+  /// - 是普通的 https manifest 地址，包一层 `itms-services`；
+  /// - 只有更新页短链（`update_url`）时返回 null —— 那是网页，
+  ///   打开只会让用户自己去点下载，正是要避免的「留下无法管理的安装包」。
+  String? get installTarget {
+    final raw = installUrl;
+    if (raw == null || raw.isEmpty) return null;
+    if (raw.startsWith('itms-services://')) return raw;
+    if (raw.startsWith('https://') || raw.startsWith('http://')) {
+      return 'itms-services://?action=download-manifest&url=${Uri.encodeComponent(raw)}';
+    }
+    return null;
   }
 
-  /// 能跳转的链接：优先安装链接，其次更新页。
-  String? get launchUrl {
-    final install = installUrl;
-    if (install != null && install.isNotEmpty) return install;
+  /// 仅用于「查看更新页」的兜底，不参与安装。
+  String? get webPageUrl {
     final update = updateUrl;
-    if (update != null && update.isNotEmpty) return update;
-    return null;
+    return update != null && update.isNotEmpty ? update : null;
   }
 
   static AppUpdateInfo? tryParse(Object? json) {
