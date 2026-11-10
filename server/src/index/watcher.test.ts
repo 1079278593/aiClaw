@@ -9,6 +9,7 @@
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { calibrateDirs, createIndexWriter, INDEX_FILENAME } from "./indexer.js";
@@ -137,6 +138,31 @@ describe("失效退化（不得作为正确性来源）", () => {
     try {
       await writeFile(path.join(base, "reflections", "inbox", "b.md"), "x", "utf-8");
       await expect(watcher.flush()).resolves.toBeUndefined();
+    } finally {
+      watcher.close();
+    }
+  });
+
+  // 回归：旧版租户的目录可能停留在建号那一刻，缺 reflections/ 这类新版才有的根。
+  // 之前的实现会对每个 root 无条件 watch，ENOENT 变成每次启动都刷的 WARN。
+  it("root 不存在时跳过注册，不抛错也不刷告警", () => {
+    const writer = createIndexWriter({ baseDir: base });
+    const missing = path.join(base, "reflections_不存在");
+    const watched: string[] = [];
+    const watcher = startIndexWatcher({
+      roots: [missing, path.join(base, "reflections")],
+      writer,
+      baseDir: base,
+      // 只记录被要求监听的路径，不真的碰文件系统，避免 EMFILE 干扰断言。
+      watchImpl: ((target: string) => {
+        watched.push(target);
+        return { on() {}, close() {} } as unknown as FSWatcher;
+      }) as typeof watch,
+    });
+    try {
+      expect(watched).toEqual([path.join(base, "reflections")]);
+      // roots 仍如实反映入参，close 不抛。
+      expect(watcher.roots).toEqual([missing, path.join(base, "reflections")]);
     } finally {
       watcher.close();
     }

@@ -217,6 +217,9 @@ export const ToolsConfigSchema = z.object({
 
 export const DEFAULT_SERVER_CONFIG = {
   port: 3000,
+  // 本地默认仍是 loopback：新装无令牌时不会意外暴露到公网。
+  // 容器/局域网部署通过 HOST=0.0.0.0（见 deploy/aiclaw.env.example）覆盖，
+  // 安全性由 accessToken / 多租户鉴权保证（见 assertServerBindSafe）。
   host: "127.0.0.1",
   accessToken: "",
   corsOrigins: [] as string[],

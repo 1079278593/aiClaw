@@ -12,7 +12,7 @@
  *    否则 §13.2 第 29 条的 stub 测试会假通过。
  */
 
-import { watch, type FSWatcher } from "node:fs";
+import { statSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { logger } from "../logger/index.js";
 import {
@@ -102,6 +102,17 @@ export function startIndexWatcher(options: WatcherOptions): IndexWatcher {
 
   for (const root of options.roots) {
     try {
+      // 目录不存在就别注册监听。
+      //
+      // `hasIndexRoots` 只看「任一 root 存在」，于是一个只有 knowledge_base、
+      // 没有 reflections 的租户（比如空壳账号）也会走到这里，
+      // `watch()` 直接 ENOENT，日志里每次启动都刷一条 WARN。
+      // 这不是异常：目录本来就可以不存在，等它被创建后由 L1 校准/下次扫描接管。
+      const stats = statSync(root, { throwIfNoEntry: false });
+      if (!stats?.isDirectory()) {
+        logger.debug(`index watcher skipped for missing root: ${root}`);
+        continue;
+      }
       const watcher = watchImpl(root, { recursive: true }, (_event, filename) => {
         const name = typeof filename === "string" ? filename : String(filename ?? "");
         if (!shouldReactTo(name)) return;

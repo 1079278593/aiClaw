@@ -5,7 +5,7 @@
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { getInstallRoot, getPaths } from "../config/paths.js";
+import { getInstallRoot, getPaths, ensureDirectories } from "../config/paths.js";
 import type { getLogger } from "../logger/index.js";
 import { sweepPendingTtl } from "../pending/ttl.js";
 import { sweepArchiveTtl } from "../pending/archive-ttl.js";
@@ -156,6 +156,18 @@ function startIndexWatchersForTenants(logger: Logger): IndexWatcherManager {
       return;
     }
     for (const dir of tenantDirs) {
+      try {
+        // 升级补建：`ensureDirectories` 是幂等的，已存在的目录与内容一律不动。
+        //
+        // 之前只有 default 租户会在 `start` 里跑 `initConfig`，其它租户的目录
+        // 停留在「建号那一刻」的版本：新版本新增的 reflections/、people/、
+        // distill/、pending/ 永远不会补上，于是索引监听报 WARN、心得页空白。
+        // 放在这里（而不是启动时一次性）可以顺带覆盖 24h 内新出现的租户。
+        await ensureDirectories(getPaths(dir));
+      } catch (error) {
+        logger.warn(`tenant bootstrap failed for ${dir}: ${(error as Error).message}`);
+        continue;
+      }
       try {
         if (await hasIndexRoots(dir)) manager.ensure(dir);
       } catch (error) {
