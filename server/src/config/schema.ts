@@ -145,6 +145,40 @@ export const DEFAULT_TOOLS_CONFIG = {
   trilium: DEFAULT_TRILIUM_TOOL_CONFIG,
 };
 
+/**
+ * App 内更新（移动端「检查更新」）。
+ *
+ * 为什么 token 放服务端而不是打进 App：
+ * `FIR_API_TOKEN` 是**账号级**凭证。用它不仅能查版本，还能列出/操作账号下
+ * 全部应用（实测 `GET http://api.appmeta.cn/apps?api_token=…` 会返回应用列表）。
+ * APK/IPA 是可解包的文件，把 token 写进客户端等于对拿到安装包的所有人公开。
+ * 所以移动端只请求本服务，由这里代理去问 fir，token 永不出现在客户端。
+ *
+ * 默认关闭：没配 token 时接口返回 `configured:false`，移动端据此隐藏入口，
+ * 而不是显示一个点了就报错的按钮。
+ */
+export const AppUpdateConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** fir / betaqr 的 API Token（32 位）。只存在服务端配置或环境变量里。 */
+  apiToken: z.string().default(""),
+  /** 查询用的 API 基址。fir 有两个域名，这里留成可配以免单点失效。 */
+  apiBase: z.string().url().default("https://api.bq04.com"),
+  /** iOS 的 Bundle ID，与 `mobile/scripts/fir.env` 保持一致。 */
+  iosBundleId: z.string().default("com.aiclaw.aiclawMobile"),
+  /** Android 的 applicationId。fir 上没有该应用时查询会返回 app is not found，属正常。 */
+  androidBundleId: z.string().default("com.aiclaw.aiclaw_mobile"),
+  timeoutMs: z.number().int().min(1000).max(120_000).default(15_000),
+});
+
+export const DEFAULT_APP_UPDATE_CONFIG = {
+  enabled: false,
+  apiToken: "",
+  apiBase: "https://api.bq04.com",
+  iosBundleId: "com.aiclaw.aiclawMobile",
+  androidBundleId: "com.aiclaw.aiclaw_mobile",
+  timeoutMs: 15_000,
+};
+
 export const CompactionConfigSchema = z.object({
   provider: ProviderNameSchema.default("zai"),
   model: z.string().min(1).default("glm-4.5-air"),
@@ -282,6 +316,7 @@ export const ConfigSchema = z.object({
   server: ServerConfigSchema.optional().default(DEFAULT_CONFIG.server),
   fs: FSConfigSchema.optional().default(DEFAULT_CONFIG.fs),
   tools: ToolsConfigSchema.optional().default(DEFAULT_CONFIG.tools),
+  appUpdate: AppUpdateConfigSchema.optional(),
   compaction: CompactionConfigSchema.default(DEFAULT_CONFIG.compaction),
 }).superRefine((config, ctx) => {
   const defaultModels = config.providers[config.defaultProvider]?.models ?? [];

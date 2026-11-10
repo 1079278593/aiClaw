@@ -20,6 +20,7 @@ import {
   DEFAULT_FS_POLICY,
   DEFAULT_SERVER_CONFIG,
   DEFAULT_TOOLS_CONFIG,
+  DEFAULT_APP_UPDATE_CONFIG,
   SUPPORTED_PROVIDERS,
   type Config,
   type FSConfig,
@@ -240,6 +241,15 @@ function mergeWithDefaults(userConfig: Partial<Config>): Config {
         ancestorNoteId: userConfig.tools?.trilium?.ancestorNoteId ?? DEFAULT_TOOLS_CONFIG.trilium.ancestorNoteId,
         timeoutMs: userConfig.tools?.trilium?.timeoutMs ?? DEFAULT_TOOLS_CONFIG.trilium.timeoutMs,
       },
+    },
+    // App 内更新：移动端只调本服务，token 留在服务端。
+    appUpdate: {
+      enabled: userConfig.appUpdate?.enabled ?? DEFAULT_APP_UPDATE_CONFIG.enabled,
+      apiToken: userConfig.appUpdate?.apiToken ?? DEFAULT_APP_UPDATE_CONFIG.apiToken,
+      apiBase: userConfig.appUpdate?.apiBase ?? DEFAULT_APP_UPDATE_CONFIG.apiBase,
+      iosBundleId: userConfig.appUpdate?.iosBundleId ?? DEFAULT_APP_UPDATE_CONFIG.iosBundleId,
+      androidBundleId: userConfig.appUpdate?.androidBundleId ?? DEFAULT_APP_UPDATE_CONFIG.androidBundleId,
+      timeoutMs: userConfig.appUpdate?.timeoutMs ?? DEFAULT_APP_UPDATE_CONFIG.timeoutMs,
     },
     compaction: {
       provider: userConfig.compaction?.provider ?? DEFAULT_CONFIG.compaction.provider,

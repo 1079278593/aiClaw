@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import 'account_settings_page.dart';
+import 'update_tile.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -80,6 +81,7 @@ class MorePage extends StatelessWidget {
                 )),
               ),
               _VersionSection(controller: controller),
+              UpdateTile(controller: controller),
               ListTile(title: const Text('退出并清除令牌'), onTap: controller.logout),
             ],
           );

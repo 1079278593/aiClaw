@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'app_update.dart';
 import 'chat_models.dart';
 import 'live_socket.dart';
 import 'session_machine.dart';
@@ -144,6 +146,29 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     config = ServerConfig.fromJson(configJson);
     await socket.connect(webSocketUri(baseUrl), token: token);
     notifyListeners();
+  }
+
+  /// 查询 App 更新。
+  ///
+  /// 走本服务而不是直连 fir：fir 的 token 是账号级凭据，
+  /// 客户端包可被解包，token 绝不能进安装包。详见服务端 `src/app-update`。
+  ///
+  /// 平台由 `defaultTargetPlatform` 决定；Android 尚未上传过包时，
+  /// 服务端会返回 `available:false`，调用方按「暂无」处理即可。
+  ///
+  /// 失败时返回 null 而不是抛异常：更新检查是附加功能，
+  /// 它坏掉不该影响「更多」页面其它内容。
+  Future<AppUpdateInfo?> checkAppUpdate() async {
+    if (baseUrl.isEmpty) return null;
+    final platform = defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios';
+    try {
+      final payload = await _guard(
+        api.getJson(apiUri(baseUrl, '/api/app/update', {'platform': platform}), token: token),
+      );
+      return AppUpdateInfo.tryParse(payload);
+    } on ApiException {
+      return null;
+    }
   }
 
   Future<T> _guard<T>(Future<T> future) async {

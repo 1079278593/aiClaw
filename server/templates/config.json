@@ -221,6 +221,14 @@
     "timeoutMs": 15000
     }
   },
+  "appUpdate": {
+    "enabled": false,
+    "apiToken": "在 fir.im → 账号设置 → API Token 里生成（只放服务端，勿打进 App）",
+    "apiBase": "https://api.bq04.com",
+    "iosBundleId": "com.aiclaw.aiclawMobile",
+    "androidBundleId": "com.aiclaw.aiclaw_mobile",
+    "timeoutMs": 15000
+  },
   "compaction": {
     "provider": "deepseek",
     "model": "deepseek-v4-flash",

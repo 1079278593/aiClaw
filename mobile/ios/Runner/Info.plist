@@ -81,5 +81,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<!-- iOS Adhoc 安装：App 内「检查更新」跳系统安装器时用。
+		     不声明的话系统会静默拒绝，表现为点了没反应。 -->
+		<string>itms-services</string>
+		<string>https</string>
+		<string>http</string>
+	</array>
 </dict>
 </plist>

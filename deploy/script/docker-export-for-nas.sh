@@ -18,7 +18,21 @@ IMAGE_NAME="${AICLAW_EXPORT_IMAGE:-aiclaw:local}"
 DEFAULT_OUTPUT="${ROOT}/deploy/aiclaw-local.tar"
 NAS_EXPORT_DIR="/Volumes/docker/aiclaw"
 NAS_EXPORT_OUTPUT="${NAS_EXPORT_DIR}/aiclaw-local.tar"
-NODE_IMAGE_CN="${AICLAW_NODE_IMAGE:-docker.1ms.run/library/node:22-bookworm-slim}"
+# ---- 基础镜像（node）来源 ----
+#
+# 为什么要三层：
+#   1. `docker.1ms.run` 之类免费镜像源会随政策/额度随时失效（实测 2026-11 已 503），
+#      只写死一个源，下次发版就再挂一次；
+#   2. 每次构建都依赖外网拉基础镜像，网络一抖就发不出去；
+#   3. NAS 构建产物与「基础镜像从哪来」无关，固化到本地不损失任何东西。
+#
+# 因此优先级：
+#   ① `aiclaw/base-node:<tag>` 本地固化镜像（不再访问任何 registry，最快最稳）
+#   ② AICLAW_NODE_IMAGE / 默认镜像源（本机没有固化镜像时的兜底）
+#   ③ 官方 node 镜像（镜像源也不可用时的最后退路）
+BASE_NODE_TAG="22-bookworm-slim"
+LOCAL_BASE_IMAGE="aiclaw/base-node:${BASE_NODE_TAG}"
+NODE_IMAGE_MIRROR="${AICLAW_NODE_IMAGE:-docker.m.daocloud.io/library/node:${BASE_NODE_TAG}}"
 NPM_REGISTRY="${AICLAW_NPM_REGISTRY:-https://registry.npmmirror.com}"
 BUILD_NUMBER_FILE="${ROOT}/deploy/build.number"
 REMOTE_DEPLOY="${ROOT}/deploy/script/docker-nas-remote-deploy.sh"
@@ -128,9 +142,15 @@ echo "$n" >"$BUILD_NUMBER_FILE"
 commit="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo no-git)"
 echo "[export] build=${n} commit=${commit} image=${IMAGE_NAME} platform=${PLATFORM:-native}"
 
-base_image="node:22-bookworm-slim"
-if [[ "$USE_CN_MIRRORS" -eq 1 ]]; then
-  base_image="$NODE_IMAGE_CN"
+# 选基础镜像：本地固化优先。只有本地没有时才走网络，并明确告诉用户。
+if docker image inspect "$LOCAL_BASE_IMAGE" >/dev/null 2>&1; then
+  base_image="$LOCAL_BASE_IMAGE"
+  echo "[export] 基础镜像: ${base_image}（本地固化，无需联网）"
+else
+  base_image="$NODE_IMAGE_MIRROR"
+  [[ "$USE_CN_MIRRORS" -eq 1 ]] || base_image="node:${BASE_NODE_TAG}"
+  echo "[export] 基础镜像: ${base_image}（本地无固化镜像，需联网拉取）"
+  echo "[export] 提示: 跑一次 ./deploy/script/pin-base-image.sh 可把它固化到本地，之后发版不再依赖镜像源。"
 fi
 
 cmd=(docker build --build-arg "NODE_IMAGE=${base_image}" --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" --build-arg "AICLAW_BUILD=${n}" --build-arg "AICLAW_COMMIT=${commit}" -t "$IMAGE_NAME" -f "${ROOT}/server/Dockerfile")
