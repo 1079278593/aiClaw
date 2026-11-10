@@ -172,7 +172,7 @@ export async function readPendingMeta(id: string, userDataDir?: string): Promise
 export async function writePendingMeta(meta: PendingMeta, userDataDir?: string): Promise<void> {
   const dir = proposalDir(meta.id, userDataDir);
   const file = path.join(dir, "meta.json");
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmp, `${JSON.stringify(meta, null, 2)}\n`, "utf-8");
   await rename(tmp, file);
 }

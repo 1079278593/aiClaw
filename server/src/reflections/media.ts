@@ -259,7 +259,7 @@ export async function writeReflectionMedia(input: {
   }
   const filename = `${id}${ext}`;
   const absoluteFile = path.join(absoluteDir, filename);
-  const tmp = `${absoluteFile}.${process.pid}.tmp`;
+  const tmp = `${absoluteFile}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmp, payload);
   await rename(tmp, absoluteFile);
   const relativeSrc = relativeMediaSrc(relativePath, filename);

@@ -61,7 +61,7 @@ function newId(): string {
 }
 
 async function writeAtomic(file: string, content: string): Promise<void> {
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmp, content, "utf-8");
   await rename(tmp, file);
 }

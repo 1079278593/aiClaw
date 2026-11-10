@@ -7,6 +7,7 @@
  * - baseHash 重定位不唯一时**不猜**，退 `stale` + `ambiguous-basehash`。
  */
 
+import { randomBytes } from "node:crypto";
 import { readFile, readdir, stat, writeFile, rename, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getPaths } from "../config/paths.js";
@@ -281,7 +282,7 @@ export async function applyProposal(id: string, options: ApplyOptions = {}): Pro
   } else {
     // doc：全文原子写，然后同步该层索引。
     await mkdir(path.dirname(targetAbs), { recursive: true });
-    const tmp = `${targetAbs}.${process.pid}.tmp`;
+    const tmp = `${targetAbs}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(tmp, detail.proposed, "utf-8");
     await rename(tmp, targetAbs);
     const sync = await writer.syncDirs([path.dirname(targetAbs)], "apply");

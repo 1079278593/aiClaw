@@ -15,7 +15,12 @@ class ApiClient {
     return _decodeObject(response.body);
   }
 
-  Future<Uint8List> getBytes(Uri uri, {String token = ''}) async {
+  /// 下载二进制内容。
+  ///
+  /// 报错文案**不能写死成「图片加载失败」**：这个方法同时用于图片和语音，
+  /// 写死过一次，结果语音取不到时也显示「图片加载失败」，
+  /// 把「路径引用错了」误导成「图片服务坏了」。所以让调用方传文案。
+  Future<Uint8List> getBytes(Uri uri, {String token = '', String errorMessage = '加载失败'}) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri);
@@ -27,10 +32,15 @@ class ApiClient {
         BytesBuilder(),
         (builder, chunk) => builder..add(chunk),
       );
+      final payload = bytes.takeBytes();
       if (response.statusCode >= 400) {
-        throw ApiException(response.statusCode, '图片加载失败');
+        // 服务端会说明具体原因（如「文件不存在或已被删除」），比通用文案有用得多。
+        throw ApiException(
+          response.statusCode,
+          _errorMessage(utf8.decode(payload, allowMalformed: true)) ?? errorMessage,
+        );
       }
-      return bytes.takeBytes();
+      return payload;
     } finally {
       client.close();
     }

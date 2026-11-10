@@ -6,6 +6,7 @@
  * 不重试、不回滚、不冒泡成错误。
  */
 
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPaths } from "../config/paths.js";
@@ -691,7 +692,7 @@ async function uniqueMdPath(
 }
 
 async function writeAtomic(file: string, content: string): Promise<void> {
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmp, content, "utf-8");
   await rename(tmp, file);
 }

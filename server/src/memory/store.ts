@@ -75,11 +75,26 @@ function newId(): string {
   return `${stamp}-${suffix}`;
 }
 
+/**
+ * 原子写：写临时文件再 rename，避免读到半个文件。
+ *
+ * 临时名**必须每次唯一**。这里踩过一个坑：原来用 `${file}.${process.pid}.tmp`，
+ * 在容器里 PID 恒为 1，同一进程内的并发写就抢同一个临时文件——
+ * 前一个 rename 把它移走后，后一个 rename 直接 ENOENT，
+ * 表现为「记忆写入报错」且 `index.jsonl` 被写成 0 字节。
+ * 并发是真实存在的：一轮对话里 `markInjected` 与记忆写入可能同时发生。
+ */
 async function writeAtomic(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, content, "utf-8");
-  await rename(tmp, file);
+  const tmp = `${file}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, content, "utf-8");
+    await rename(tmp, file);
+  } catch (error) {
+    // 失败时清掉临时文件，避免残留一堆 .tmp
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function readText(file: string): Promise<string> {
@@ -89,6 +104,27 @@ async function readText(file: string): Promise<string> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
     throw error;
   }
+}
+
+/**
+ * 按文件路径串行化「读-改-写」。
+ *
+ * `addEntry` / `markInjected` 都是先读全文、改、再整体写回。两次调用并发时，
+ * 后一次的读发生在先一次的写之前，就会用旧快照覆盖掉对方的成果——
+ * 实测 10 个并发 `addEntry` 只留下 1 条，其余 9 条静默丢失。
+ * `writeAtomic` 保证的是「不读到半个文件」，管不住这种丢失，所以需要这层队列。
+ *
+ * 用 Promise 链而不是锁库：粒度是单文件，同一文件的写天然很轻
+ * （一个 jsonl 或一段 Markdown），排队不会成为瓶颈。
+ */
+const fileQueues = new Map<string, Promise<unknown>>();
+
+function withFileLock<T>(file: string, task: () => Promise<T>): Promise<T> {
+  const previous = fileQueues.get(file) ?? Promise.resolve();
+  // 前一个任务失败也要继续执行后一个，所以先 catch 掉。
+  const next = previous.catch(() => undefined).then(task);
+  fileQueues.set(file, next.catch(() => undefined));
+  return next;
 }
 
 // ---- 正文解析 ----
@@ -322,9 +358,11 @@ export type AddEntryInput = {
 export async function addEntry(input: AddEntryInput, userDataDir?: string): Promise<MemoryEntry | null> {
   const text = String(input.text ?? "").trim();
   if (!text) return null;
-
   const layer = input.layer;
   const file = layerFile(layer, userDataDir);
+  // 读-改-写必须串行，否则并发会互相覆盖（详见 withFileLock 注释）。
+  // 锁的是**元数据**文件：正文与元数据必须一起更新，锁同一个就不会错位。
+  return withFileLock(indexFile(userDataDir), async () => {
   const raw = await readText(file);
   const blocks = parseLayer(raw);
   const metaRows = await readMetas(userDataDir);
@@ -360,6 +398,7 @@ export async function addEntry(input: AddEntryInput, userDataDir?: string): Prom
   await writeMetas([...metaRows, meta], userDataDir);
 
   return { ...meta, text };
+  });
 }
 
 /** 整体覆盖一层的正文（`focus.md` 这类「刷新」语义），保留文件头说明。 */
@@ -370,6 +409,7 @@ export async function replaceLayer(
   userDataDir?: string,
 ): Promise<void> {
   const file = layerFile(layer, userDataDir);
+  await withFileLock(indexFile(userDataDir), async () => {
   const raw = await readText(file);
   const blocks = text.trim() ? [{ id: newId(), title: "当前关注", text: text.trim() }] : [];
   const next = renderLayer(layerHeader(raw), blocks);
@@ -393,10 +433,12 @@ export async function replaceLayer(
     });
   }
   await writeMetas(metas, userDataDir);
+  });
 }
 
 /** 删除一条记忆（按 id）。正文与元数据同时清理，正文先归档。 */
 export async function removeEntry(id: string, userDataDir?: string): Promise<boolean> {
+  return withFileLock(indexFile(userDataDir), async () => {
   const metas = await readMetas(userDataDir);
   const target = metas.find((meta) => meta.id === id);
   if (!target) return false;
@@ -408,6 +450,7 @@ export async function removeEntry(id: string, userDataDir?: string): Promise<boo
   await writeAtomic(file, renderLayer(layerHeader(raw), blocks));
   await writeMetas(metas.filter((meta) => meta.id !== id), userDataDir);
   return true;
+  });
 }
 
 /**
@@ -419,6 +462,7 @@ export async function markInjected(ids: string[], now = new Date(), userDataDir?
   if (ids.length === 0) return;
   const wanted = new Set(ids);
   const stamp = now.toISOString();
+  await withFileLock(indexFile(userDataDir), async () => {
   let changed = false;
   const metas = (await readMetas(userDataDir)).map((meta) => {
     if (!wanted.has(meta.id)) return meta;
@@ -426,6 +470,7 @@ export async function markInjected(ids: string[], now = new Date(), userDataDir?
     return { ...meta, used: meta.used + 1, lastUsed: stamp };
   });
   if (changed) await writeMetas(metas, userDataDir);
+  });
 }
 
 /** 初始化：目录与空正文文件。空文件也建，让用户能直接打开写。 */

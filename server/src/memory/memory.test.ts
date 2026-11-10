@@ -300,3 +300,51 @@ describe("remember 工具（plan §3.4）", () => {
     expect(result.content).toContain("focus.md 已满");
   });
 });
+
+/**
+ * 并发写回归：临时文件名必须每次唯一。
+ *
+ * 原来的实现是 `${file}.${process.pid}.tmp`。本机测试看不出来（每次调用
+ * PID 不同），但**容器里 PID 恒为 1**，同一进程的并发写就抢同一个临时文件：
+ * 前一个 rename 把它移走，后一个 rename 直接 ENOENT。
+ *
+ * 线上表现（NAS 日志）：`ENOENT: rename '.../index.jsonl.1.tmp'` 反复出现，
+ * 且 `index.jsonl` 被写成 0 字节，最终让聊天请求整体失败。
+ */
+describe("并发原子写", () => {
+  it("同一进程内并发写 index.jsonl 不报错且内容完整", async () => {
+    // 40 个并发是线上量级的保守模拟：一轮对话里 markInjected 与
+    // 多条记忆写入可能同时发生。
+    const writes = Array.from({ length: 40 }, (_, i) =>
+      markInjected([`id-${i}`], new Date(), dir),
+    );
+    await expect(Promise.all(writes)).resolves.toBeDefined();
+
+    // 文件必须可读且是合法 jsonl（不能是半截或空）。
+    const raw = await readFile(path.join(dir, "agents", "main", "memory", "index.jsonl"), "utf-8");
+    for (const line of raw.split("\n").filter(Boolean)) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  it("并发 addEntry 不丢条目", async () => {
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        addEntry({ layer: "longterm", text: `并发条目 ${i}` }, dir),
+      ),
+    );
+    const entries = await readLayer("longterm", dir);
+    expect(entries).toHaveLength(10);
+  });
+
+  it("并发写后不残留 .tmp 文件", async () => {
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        addEntry({ layer: "focus", text: `焦点 ${i}` }, dir),
+      ),
+    );
+    const memoryDir = path.join(dir, "agents", "main", "memory");
+    const leftovers = (await readdir(memoryDir)).filter((name) => name.endsWith(".tmp"));
+    expect(leftovers).toEqual([]);
+  });
+});

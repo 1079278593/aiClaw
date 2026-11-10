@@ -523,6 +523,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
     final bytes = await widget.controller.api.getBytes(
       apiUri(widget.controller.baseUrl, '/api/reflections/media', {'path': mediaPath}),
       token: widget.controller.token,
+      errorMessage: '语音加载失败',
     );
     if (bytes.length < 32) throw ApiException(500, '录音文件是空的');
     final dir = await getTemporaryDirectory();
@@ -562,6 +563,7 @@ class _ReflectionPageState extends State<ReflectionPage> {
           'path': mediaPath,
         }),
         token: widget.controller.token,
+        errorMessage: '图片加载失败',
       );
       if (!mounted) return;
       setState(() => _imageBytes[item.src] = bytes);

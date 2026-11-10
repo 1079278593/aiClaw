@@ -7,6 +7,7 @@
  * 3. 过滤规则只实现一次（`listChildEntries`），索引与 `view=tree` 共用。
  */
 
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPaths } from "../config/paths.js";
@@ -134,7 +135,7 @@ export function createIndexWriter(options: IndexWriterOptions = {}): IndexWriter
     const current = await readFile(file, "utf-8").catch(() => null);
     if (current === content) return;
     await mkdir(dir, { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(tmp, content, "utf-8");
     await rename(tmp, file);
   }
