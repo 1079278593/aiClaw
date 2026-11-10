@@ -23,6 +23,8 @@ PODS:
     - CwlCatchException
     - Flutter
     - FlutterMacOS
+  - url_launcher_ios (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - audio_session (from `.symlinks/plugins/audio_session/ios`)
@@ -36,6 +38,7 @@ DEPENDENCIES:
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - speech_to_text (from `.symlinks/plugins/speech_to_text/darwin`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 EXTERNAL SOURCES:
   audio_session:
@@ -60,6 +63,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
   speech_to_text:
     :path: ".symlinks/plugins/speech_to_text/darwin"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
   audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
@@ -73,6 +78,7 @@ SPEC CHECKSUMS:
   record_ios: 980fd386a97a35987d0fce3dfda4b26a38c90f4c
   shared_preferences_foundation: a7c3904f2dedb3701dd1903cb152ef5e7df92422
   speech_to_text: 3b313d98516d3d0406cea424782ec25470c59d19
+  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: ad28b126eea73a6e7ef55ca76bdd6e9a0ed41cc3
 
