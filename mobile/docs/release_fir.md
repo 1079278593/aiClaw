@@ -28,15 +28,12 @@ cp scripts/fir.env.example scripts/fir.env
 
 ### 3. Android
 
-> **当前不发 Android**：本项目只用 iOS 设备。`--android` / `--all` 只做编译自检，
-> 产物留在 `build/app/outputs/flutter-apk/`，**不会上传**。默认平台是 iOS。
-> 另外这台开发机没有 Android SDK，`flutter build apk` 会直接报错，属预期。
+**本项目不发布 Android**：不编译、不打包、不上传。`--android` 会直接报错退出，
+`--all` 按 `--ios` 处理。开发机也没有装 Android SDK。
 
 | 项 | 说明 |
 |----|------|
-| 产物 | `flutter build apk --release` |
-| 签名 | 当前工程 release 仍用 **debug 签名**（见 `android/app/build.gradle.kts`），内测可以；正式对外建议配置 release keystore |
-| Bundle ID | `com.aiclaw.aiclaw_mobile` |
+| Bundle ID | `com.aiclaw.aiclaw_mobile`（仅作记录，当前不使用） |
 
 ### 4. iOS（比 Android 多）
 
@@ -60,32 +57,28 @@ chmod +x mobile/scripts/发布到fir.command mobile/scripts/publish-fir.sh
 
 菜单选项（若使用 `.command`）：
 
-1. 仅 iOS（默认推荐）  
-2. 仅 Android  
-3. Android + iOS 双端  
-4. 只上传已有包（不构建、不递增版本）  
+1. 仅 iOS（默认）  
+2. 只上传已有包（不构建、不递增版本）  
 0. 取消  
+
+Android 不在本项目范围内，菜单里没有对应项。
 
 ## 命令行
 
-在 `mobile/` 目录。**默认只发 iOS，不发 Android。**
+在 `mobile/` 目录。**只有 iOS。**
 
 ```bash
-# 默认：仅 iOS Adhoc（build 自动 +1）
+# 默认：iOS Adhoc（build 自动 +1）
 ./scripts/publish-fir.sh --changelog "更新说明"
 
-# 显式仅 iOS
+# 显式指定 iOS
 ./scripts/publish-fir.sh --ios --changelog "iOS Adhoc"
-
-# 仅 Android（需显式指定）
-./scripts/publish-fir.sh --android --changelog "Android 内测"
-
-# 两平台
-./scripts/publish-fir.sh --all --changelog "双端"
 
 # 已构建过，只上传 IPA
 ./scripts/publish-fir.sh --ios --skip-build --no-bump
 ```
+
+`--android` 会直接报错退出；`--all` 按 `--ios` 处理（仅为兼容旧脚本）。
 
 无 `scripts/fir.env` 时会读本机 `~/.fir-cli` 的 token。
 
@@ -104,7 +97,6 @@ fir p build/app/outputs/flutter-apk/app-release.apk -T "$FIR_API_TOKEN" -c "更�
 
 ## 常见问题
 
-- **第一次内测建议选菜单 1（仅 Android）**：不需要 Apple 签名，先验证 fir token 与上传流程。
 - **iOS 签名失败**（`No Account for Team "…"` / `No profiles`）：
   - **在 Xcode 里配一次即可**（与 `flutter run` 真机相同）：
     ```bash
@@ -117,4 +109,3 @@ fir p build/app/outputs/flutter-apk/app-release.apk -T "$FIR_API_TOKEN" -c "更�
 - **`HTTP2 framing layer` / `flutter.git` fetch 失败**：脚本已设 `GIT_HTTP_VERSION=1.1`；仍失败可终端执行 `git config --global http.version HTTP/1.1` 后重试。
 - **构建失败但 build 号变了**：新版本脚本只在 **上传成功** 后写回 `pubspec.yaml`。
 - **fir 拒绝 IPA**：确认不是 App Store 导出；必须是 Adhoc / Inhouse。
-- **Android 装不上**：检查是否用了 release APK，以及是否允许安装未知来源。
