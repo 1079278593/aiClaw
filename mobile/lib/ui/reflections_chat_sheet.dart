@@ -3,20 +3,20 @@ import 'package:flutter/material.dart';
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import 'chat_page.dart';
+import 'context_sources_page.dart';
 
-/// 心得首页底部的「对话 / 待应用」入口与 90% 弹层
-/// （mobile/docs/… plan_reflections_chat.md §10.2）。
+/// 心得首页底部的「对话 / 待应用」入口。
 const reflectionsEntryBottomInset = 12.0;
 
 /// 列表底部要给按钮让出的高度：按钮高度 + 上下间距。
 const reflectionsEntryReserve = 76.0;
 
-/// 打开心得对话层。高度约屏幕 90%，上限 720。
-Future<void> showReflectionsChatSheet(BuildContext context, AppController controller) async {
-  final media = MediaQuery.of(context);
-  final maxHeight = media.size.height * 0.9;
-  final height = maxHeight > 720 ? 720.0 : maxHeight;
-
+/// 打开心得对话。
+///
+/// 原来是「占屏幕 90% 的底部弹层」，改成整页（plan_reflections_chat.md §10.2 的更新）：
+/// 弹层顶部要被标题栏吃掉一块，键盘弹出后又吃掉一半，实际可见的对话只有几行，
+/// 长回答基本没法读。整页把这些空间还回来，并且能直接复用 `ChatPage` 的完整工具栏。
+Future<void> showReflectionsChat(BuildContext context, AppController controller) async {
   String? sessionId;
   Object? error;
   try {
@@ -31,70 +31,91 @@ Future<void> showReflectionsChatSheet(BuildContext context, AppController contro
     );
     return;
   }
-  // 弹层借用当前会话位：关掉后要退回原会话，否则切到「聊天」会看到心得对话。
+
+  // 整页借用当前会话位：关掉后要退回原会话，否则切到「聊天」会看到心得对话。
   final previousSessionId = controller.machine.currentSessionId;
   controller.openSession(sessionId);
   try {
-    await _showChatSheet(context, controller, sessionId, height);
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (routeContext) => _ReflectionsChatPage(
+        controller: controller,
+        sessionId: sessionId!,
+      ),
+    ));
   } finally {
+    // finally 而不是顺序执行：push 中途抛错时，会话位不能停在心得会话上。
     if (previousSessionId != null && previousSessionId != sessionId) {
       controller.openSession(previousSessionId);
     }
   }
 }
 
-Future<void> _showChatSheet(
-  BuildContext context,
-  AppController controller,
-  String sessionId,
-  double height,
-) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (context) {
-      final scheme = Theme.of(context).colorScheme;
-      return SizedBox(
-        height: height,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text('心得对话', style: TextStyle(fontWeight: FontWeight.w600)),
+class _ReflectionsChatPage extends StatefulWidget {
+  const _ReflectionsChatPage({required this.controller, required this.sessionId});
+
+  final AppController controller;
+  final String sessionId;
+
+  @override
+  State<_ReflectionsChatPage> createState() => _ReflectionsChatPageState();
+}
+
+class _ReflectionsChatPageState extends State<_ReflectionsChatPage> {
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final badge = widget.controller.pendingBadge;
+        return ChatPage(
+          key: ValueKey(widget.sessionId),
+          controller: widget.controller,
+          sessionId: widget.sessionId,
+          title: '心得对话',
+          // 整页没有「返回上一步」的概念，关闭时只是退出这一页；
+          // 会话位由 `showReflectionsChat` 在 pop 之后还原。
+          onOrganizeSent: () => Navigator.of(context).maybePop(),
+          extraActions: [
+            // 手机宽度放不下四个图标按钮。低频的「上下文」和带角标的「待应用」
+            // 收进溢出菜单，图片 / 模型 / 更多仍直接可见。
+            PopupMenuButton<String>(
+              tooltip: '更多操作',
+              onSelected: (value) {
+                if (value == 'pending') {
+                  showPendingSheet(context, widget.controller);
+                }
+                if (value == 'context') {
+                  showContextSourcesPage(context, widget.controller);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'context',
+                  child: const Row(
+                    children: [
+                      Icon(Icons.data_object, size: 18),
+                      SizedBox(width: 10),
+                      Text('上下文来源'),
+                    ],
                   ),
-                  IconButton(
-                    tooltip: '待应用',
-                    onPressed: () => showPendingSheet(context, controller),
-                    icon: const Icon(Icons.inbox_outlined),
+                ),
+                PopupMenuItem(
+                  value: 'pending',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.inbox_outlined, size: 18),
+                      const SizedBox(width: 10),
+                      Text(badge > 0 ? '待应用 $badge' : '待应用'),
+                    ],
                   ),
-                  IconButton(
-                    tooltip: '收起',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.keyboard_arrow_down),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: scheme.outlineVariant),
-            Expanded(
-              child: ChatPage(
-                key: ValueKey(sessionId),
-                controller: controller,
-                sessionId: sessionId,
-                embedded: true,
-                title: '心得对话',
-                onOrganizeSent: () => Navigator.of(context).pop(),
-              ),
+                ),
+              ],
             ),
           ],
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 /// 「待应用」列表：一条 pending 展开成 base / proposed 对比 + 应用 / 丢弃。
@@ -109,7 +130,6 @@ Future<void> showPendingSheet(BuildContext context, AppController controller) as
     ),
   );
 }
-
 class _PendingItem {
   _PendingItem.fromJson(Map<String, Object?> json)
     : id = '${json['id'] ?? ''}',

@@ -282,3 +282,31 @@ reflections/<folder>/
 
 拿去问：打开该篇后发 `chatMessage` 带 `previewPath`（路径如 `reflections/inbox/xxx.md`），不设 `threadPath`。
 
+
+## 上下文来源
+
+「每轮对话必然带上的内容」各占多少 token，以及手动改写。字段与 WHY 见服务端 `src/context/sources.ts`。
+
+`GET /api/context/sources`：
+
+| 字段 | 用途 |
+|---|---|
+| `sources[]` | 各内容块。顺序是「最容易被丢弃 → 必须保留」 |
+| `sources[].id` | `constitution` / `constitutionFallback` / `user` / `focus` / `runtime` / `longterm` / `distillMap` / `rootIndex` |
+| `sources[].label` / `role` / `file` | 展示用：名称、这一块在提示里的作用、相对数据根的路径 |
+| `sources[].always` | 是否**无条件**每轮注入。false = 按开关或按相关性才带 |
+| `sources[].editable` / `readonlyReason` | 是否可在此改写；不可改时给原因，不要自己猜 |
+| `sources[].content` / `editText` | `content` 是注入形态（记忆层带 `<memory>` 包装），`editText` 是磁盘原文。**编辑框只用 `editText`**，把注入形态写回会让包装层层嵌套 |
+| `sources[].tokens` / `max` / `maxBytes` | 该块 token 数与上限。记忆四层共用一个上限，故四层标同一个值 |
+| `sources[].overLimit` | 超限。超限的块会被**整块丢弃**，不是截断 |
+| `sources[].bytes` / `entries` | 字节数；条目数（仅多条目来源） |
+| `totalTokens` / `totalMax` | 每轮固定成本（只累加 `always`）与固定块上限合计。不等于模型窗口 |
+| `switches.injectRootIndex` / `injectDistillMap` | 两个开关的当前值 |
+
+`PUT /api/context/sources`，body `{ updates: [{ id, content }] }`：
+
+- 提交的是**整块内容**，语义是「用这份替换那一块」，不是局部补丁。
+- 无草稿态：落盘即生效，下一条消息就带上。因此客户端必须先「确认」再发，不能输入即保存。
+- 逐条独立。**部分失败返回 400，但响应体仍带 `saved` / `failed[]` / `overview`**。客户端不要用「见到 4xx 就抛异常」的通用请求方法，否则丢掉的正是「哪一块没成、为什么」。401 仍按凭证问题处理。
+- 超限的块会被整块丢弃、等于白写，服务端在写入前就拒绝，`failed[]` 里给出具体数值。
+- 手改记忆层会清掉该层与正文失去对应的条目元数据（`used` / `lastUsed` / `pinned` 归零）：正文不会丢，但「用过几次」的统计会重置。

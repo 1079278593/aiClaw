@@ -116,7 +116,7 @@ void main() {
     expect(find.textContaining('1 条已失效'), findsOneWidget);
   });
 
-  testWidgets('对话弹层高度约为屏幕 90%，且不中断会话', (tester) async {
+  testWidgets('心得对话改为整页：未连接时只提示，不进页面', (tester) async {
     tester.view.physicalSize = const Size(400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -127,14 +127,14 @@ void main() {
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () => showReflectionsChatSheet(context, controller),
+            onPressed: () => showReflectionsChat(context, controller),
             child: const Text('打开'),
           ),
         ),
       ),
     ));
 
-    // 未连接时拿不到会话，应该只弹提示而不是崩。
+    // 未连接时拿不到会话，应该只弹提示而不是崩，也不应压进一个页面。
     await tester.tap(find.text('打开'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

@@ -330,7 +330,7 @@ class _ReflectionsListPageState extends State<ReflectionsListPage> {
       builder: (context, _) {
         final badge = widget.controller.pendingBadge;
         return FilledButton.tonalIcon(
-          onPressed: () => showReflectionsChatSheet(context, widget.controller),
+          onPressed: () => showReflectionsChat(context, widget.controller),
           icon: const Icon(Icons.auto_awesome, size: 18),
           label: Text(badge > 0 ? '心得对话 · 待应用 $badge' : '心得对话'),
         );

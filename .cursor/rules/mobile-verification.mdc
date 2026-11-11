@@ -1,0 +1,38 @@
+---
+description: 移动端（Flutter）验证与发包约定
+globs: mobile/**
+alwaysApply: true
+---
+
+# 移动端验证与发包约定
+
+## 禁止 iOS 模拟器
+
+**不要**运行、调试或截图 iOS 模拟器。不要 `xcrun simctl boot`，不要 `flutter run -d <simulator>`，
+不要用模拟器验证界面。用户会自己清理模拟器实例，不要代为删除或重建。
+
+改动验证只用这四种手段：
+
+1. `cd mobile && flutter analyze`
+2. `cd mobile && flutter test`
+3. `cd mobile && flutter build ios --no-codesign`（只验证编译，不启动）
+4. 需要看真机效果时，发给用户由用户装
+
+布局是否溢出这类问题，用 widget 测试在窄视口下断言（`tester.view.physicalSize`），
+不要靠模拟器截图。参考 `mobile/test/context_sources_layout_test.dart`。
+
+## 发包
+
+- **iOS**：必须走 fir。`cd mobile && ./scripts/publish-fir.sh --ios --changelog "..."`，
+  默认自动递增 build 号并写回 `pubspec.yaml`。详见 `mobile/docs/release_fir.md`。
+- **Android 无需发包**：不要上传 APK 到 fir 或任何分发平台。用户设备只跑 iOS。
+  `--android` / `--all` 只做编译自检，产物留在 `build/app/outputs/flutter-apk/`。
+  `publish-fir.sh` 的默认平台已经是 iOS。
+  注意：这台开发机**没有 Android SDK**（`flutter build apk` 报 `No Android SDK found`），
+  所以 Android 改动实际上无法本地验证。不要声称 Android 已验证过，
+  也不要为了「验证 Android」去安装 SDK 或跑模拟器。
+- 发版后如需 App 内更新提示，确认租户 `config.json` 的 `appUpdate` 指向正确的 bundle id。
+
+## 服务端
+
+服务端改动后：`cd server && pnpm build && pnpm test --run`，再按 `deploy/部署文档.md` 发到 NAS。

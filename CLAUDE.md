@@ -1,9 +1,16 @@
 # aiClaw - 个人本地知识库AI助手
 
 ## 项目信息
-- **平台**：Windows 11 —— 使用 Windows 路径（反斜杠），而非 `/mnt/c/...`
+- **平台**：开发机是 macOS，路径用正斜杠。服务端文档里出现的 Windows 路径是历史遗留，以仓库实际结构为准。
 - 启动服务器：在 `server/` 执行 `pnpm build && node dist/cli/index.js start`
 - 运行测试：在 `server/` 执行 `pnpm test --run`
+
+## 移动端验证约定（务必遵守）
+
+- **禁止在 iOS 模拟器上运行或调试**。验证改动只用：`flutter analyze`、`flutter test`、`flutter build ios --no-codesign`（只验证编译，不启动），以及真机。
+- **iOS 发包必须走 fir**，见 `mobile/docs/release_fir.md`；不要让用户手动拖 IPA。
+- **Android 无需发包**：Android 只保证代码不写坏，不要求上传到任何分发平台，也不用在真机上等验证结论。用户设备只跑 iOS。注意这台开发机没有 Android SDK，Android 编译无法本地验证，不要声称验证过。
+- 模拟器实例由用户自己清理，不要代为删除或重建。
 
 ## 架构
 项目架构、模块职责、API 路由、数据格式，参见 [server/docs/architecture.md](server/docs/architecture.md)

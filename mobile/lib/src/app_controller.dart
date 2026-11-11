@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
 import 'app_update.dart';
 import 'chat_models.dart';
+import 'context_sources.dart';
 import 'live_socket.dart';
 import 'session_machine.dart';
 
@@ -640,8 +641,49 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<List<UsageDay>> loadUsageDaily(int days) => _guard(_loadUsageDaily(days));
+  /// 「上下文来源」：每轮必带的内容各占多少 token，并允许逐块修改。
+  ///
+  /// 走 `_guard`：这块数据和别的请求一样会因令牌失效而 401。
+  Future<ContextOverview> loadContextSources() => _guard(_loadContextSources());
 
+  Future<ContextOverview> _loadContextSources() async {
+    final payload = await api.getJson(apiUri(baseUrl, '/api/context/sources'), token: token);
+    final overview = ContextOverview.tryParse(payload);
+    if (overview == null) {
+      throw ApiException(500, '上下文来源返回格式不对');
+    }
+    return overview;
+  }
+
+  /// 提交改动的块。服务端逐条处理，一条失败不影响其他条。
+  ///
+  /// 注意不能用 `sendJson`：局部失败时服务端返回 **400 且带完整结果体**，
+  /// 而 `sendJson` 见到 4xx 直接抛异常，丢掉的正是「哪一条没成、为什么」。
+  Future<ContextSaveResult> saveContextSources(
+    Map<String, String> updates,
+  ) => _guard(_saveContextSources(updates));
+
+  Future<ContextSaveResult> _saveContextSources(Map<String, String> updates) async {
+    // 与其它需要读错误体的请求保持一致，这里直接按「成功/失败都要 body」处理。
+    final result = await api.sendJsonAllowError(
+      'PUT',
+      apiUri(baseUrl, '/api/context/sources'),
+      token: token,
+      body: {
+        'updates': [
+          for (final entry in updates.entries) {'id': entry.key, 'content': entry.value},
+        ],
+      },
+    );
+    final parsed = ContextSaveResult.from(result.body);
+    if (result.statusCode >= 400 && parsed.failed.isEmpty) {
+      // 没有任何逐条信息时，退回服务端的整体错误文案。
+      throw ApiException(result.statusCode, result.error ?? '保存失败');
+    }
+    return parsed;
+  }
+
+  Future<List<UsageDay>> loadUsageDaily(int days) => _guard(_loadUsageDaily(days));
   Future<List<UsageDay>> _loadUsageDaily(int days) async {
     final payload = await api.getJsonAny(apiUri(baseUrl, '/api/usage/daily', {'days': '$days'}), token: token);
     if (payload is! List) return [];

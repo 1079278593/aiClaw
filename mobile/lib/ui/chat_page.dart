@@ -20,6 +20,8 @@ class ChatPage extends StatefulWidget {
     this.consult,
     this.onOrganizeSent,
     this.title,
+    this.extraActions,
+    this.leading,
   });
   final AppController controller;
   final String sessionId;
@@ -27,8 +29,17 @@ class ChatPage extends StatefulWidget {
   final VoidCallback? onHistory;
   final PersonConsult? consult;
   final VoidCallback? onOrganizeSent;
-  /// 覆盖标题（心得弹层用「心得对话」）。
+  /// 覆盖标题（心得对话用「心得对话」）。
   final String? title;
+
+  /// 追加到 AppBar actions 末尾的按钮。
+  ///
+  /// 页面级用法（比如心得对话）需要额外入口，但不该在这里重新拼一遍
+  /// 图片 / 模型 / 更多那套按钮：那会变成两份要同时维护的布局。
+  final List<Widget>? extraActions;
+
+  /// 覆盖返回按钮。用于「关闭时要把会话位退回去」这类收尾逻辑。
+  final Widget? leading;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -79,6 +90,7 @@ class _ChatPageState extends State<ChatPage> {
         return Scaffold(
           appBar: AppBar(
             automaticallyImplyLeading: !widget.embedded,
+            leading: widget.leading,
             title: Text(widget.title ?? (runtime.title?.isNotEmpty == true ? runtime.title! : '对话')),
             actions: [
               if (widget.onHistory != null)
@@ -101,6 +113,7 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                 ],
               ),
+              ...?widget.extraActions,
             ],
           ),
           body: Column(

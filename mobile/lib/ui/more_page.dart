@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import 'account_settings_page.dart';
+import 'context_sources_page.dart';
 import 'update_tile.dart';
 
 class MorePage extends StatelessWidget {
@@ -72,6 +73,12 @@ class MorePage extends StatelessWidget {
                 onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                   builder: (_) => AccountSettingsPage(controller: controller),
                 )),
+              ),
+              ListTile(
+                title: const Text('上下文来源'),
+                subtitle: const Text('每轮对话固定带上的内容，按 token 计量，可逐块修改'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => showContextSourcesPage(context, controller),
               ),
               ListTile(
                 title: const Text('用量'),

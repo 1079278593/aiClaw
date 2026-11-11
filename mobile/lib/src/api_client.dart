@@ -62,6 +62,22 @@ class ApiClient {
     return _decodeObject(response.body);
   }
 
+  /// 与 `sendJson` 相同，但 **4xx/5xx 不抛异常**，把状态码和响应体一起返回。
+  ///
+  /// 用于「部分成功」语义的接口：服务端在 400 里同时给出已保存的列表、
+  /// 逐条失败原因和最新统计。用 `sendJson` 会把这些信息连同异常一起丢掉，
+  /// 界面就只能说一句「保存失败」，用户不知道是哪一块、为什么。
+  /// 401 仍然抛出——那是凭证问题，不是业务结果。
+  Future<ApiResult> sendJsonAllowError(
+    String method,
+    Uri uri, {
+    String token = '',
+    Map<String, Object?>? body,
+  }) async {
+    final response = await _sendAllowError(method, uri, token: token, body: body);
+    return ApiResult(response.statusCode, _decodeObject(response.body));
+  }
+
   Future<Map<String, Object?>> postMultipart(
     Uri uri, {
     required String token,
@@ -141,8 +157,40 @@ class ApiClient {
     }
   }
 
-  Map<String, Object?> _decodeObject(String text) {
-    if (text.isEmpty) return {};
+  /// 和 `_send` 走同一套请求构造，区别只在**不把 4xx/5xx 变成异常**。
+  Future<_HttpResult> _sendAllowError(
+    String method,
+    Uri uri, {
+    required String token,
+    Map<String, Object?>? body,
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.openUrl(method, uri);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      if (body != null) {
+        request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+        request.add(utf8.encode(jsonEncode(body)));
+      }
+      final response = await request.close();
+      final text = await utf8.decodeStream(response);
+      if (response.statusCode == 401) {
+        throw ApiException(401, _errorMessage(text) ?? '凭证无效');
+      }
+      return _HttpResult(response.statusCode, text);
+    } on ApiException {
+      rethrow;
+    } on SocketException {
+      throw ApiException(0, '无法连接服务器');
+    } finally {
+      client.close();
+    }
+  }
+
+  Map<String, Object?> _decodeObject(String text) {    if (text.isEmpty) return {};
     final decoded = jsonDecode(text);
     if (decoded is Map<String, Object?>) return decoded;
     if (decoded is Map) return Map<String, Object?>.from(decoded);
@@ -154,6 +202,22 @@ class _HttpResult {
   _HttpResult(this.statusCode, this.body);
   final int statusCode;
   final String body;
+}
+
+/// 不抛异常的一次请求结果：状态码 + 已解析的 JSON 体。
+class ApiResult {
+  ApiResult(this.statusCode, this.body);
+
+  final int statusCode;
+  final Map<String, Object?> body;
+
+  bool get ok => statusCode < 400;
+
+  /// 服务端的整体错误文案（`{"error": "..."}`）。
+  String? get error {
+    final value = body['error'];
+    return value is String && value.isNotEmpty ? value : null;
+  }
 }
 
 String? _errorMessage(String text) {

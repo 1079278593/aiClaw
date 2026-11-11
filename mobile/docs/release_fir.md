@@ -28,6 +28,10 @@ cp scripts/fir.env.example scripts/fir.env
 
 ### 3. Android
 
+> **当前不发 Android**：本项目只用 iOS 设备。`--android` / `--all` 只做编译自检，
+> 产物留在 `build/app/outputs/flutter-apk/`，**不会上传**。默认平台是 iOS。
+> 另外这台开发机没有 Android SDK，`flutter build apk` 会直接报错，属预期。
+
 | 项 | 说明 |
 |----|------|
 | 产物 | `flutter build apk --release` |
