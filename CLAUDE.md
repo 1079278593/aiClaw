@@ -9,7 +9,7 @@
 
 - **禁止在 iOS 模拟器上运行或调试**。验证改动只用：`flutter analyze`、`flutter test`、`flutter build ios --no-codesign`（只验证编译，不启动），以及真机。
 - **iOS 发包必须走 fir**，见 `mobile/docs/release_fir.md`；不要让用户手动拖 IPA。
-- **Android 无需发包**：Android 只保证代码不写坏，不要求上传到任何分发平台，也不用在真机上等验证结论。用户设备只跑 iOS。注意这台开发机没有 Android SDK，Android 编译无法本地验证，不要声称验证过。
+- **Android 完全不管**：不编译、不打包、不发包、不验证。`flutter build apk` 不要跑，也不要为「顺手验证一下」去装 Android SDK 或起模拟器。
 - 模拟器实例由用户自己清理，不要代为删除或重建。
 
 ## 架构
