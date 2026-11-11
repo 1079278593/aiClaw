@@ -5,7 +5,10 @@ dist/
 .claude/
 .agents/
 .pnpm-store/
-scripts/
+# 只忽略根目录下临时的 scripts/，别把 mobile/scripts 这类被跟踪的目录一起吞掉
+/scripts/
+# 分发凭证不入库
+**/scripts/fir.env
 
 # Logs
 logs/
