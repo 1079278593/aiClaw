@@ -32,8 +32,25 @@ import {
   type SystemBlock,
 } from "./context-budget.js";
 import { buildMemoryInjection } from "../memory/inject.js";
+import { MEMORY_TOKEN_MAX } from "../memory/types.js";
+import { DIALOGUE_STATE_TOKEN_MAX, loadCurrentDialogueBlock, loadDialogueState } from "./dialogue-state.js";
+import type { DialogueSessionState } from "./dialogue-state.js";
+import { foldDialogueState, historyAfterCursor } from "./dialogue-fold.js";
 import { buildDistillMapInjection } from "../distill/inject.js";
 import { markInjected } from "../memory/store.js";
+import { loadAppState } from "../app-state/index.js";
+
+export { MEMORY_TOKEN_MAX };
+
+/** 循环进度：用于前端显示「第几轮 / 已调用多少次工具」。 */
+export interface LoopProgress {
+  /** 已完成第几轮工具往返（从 1 开始）。 */
+  round: number;
+  /** 已执行的工具调用次数。 */
+  toolCalls: number;
+  /** 配置的工具调用上限。 */
+  maxToolCalls: number;
+}
 
 export interface ChatOptions {
   stream?: boolean;
@@ -46,6 +63,8 @@ export interface ChatOptions {
   onReasoningChunk?: (chunk: string) => void;
   onToolCall?: (name: string, input: Record<string, unknown>, callId: string) => void;
   onToolResult?: (name: string, content: string, isError: boolean, callId: string) => void;
+  /** 每轮工具往返结束后的循环进度，用于前端显示「第 N 轮 / 已调用 M 次」。 */
+  onLoopProgress?: (progress: LoopProgress) => void;
   checkPermission?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
   signal?: AbortSignal;
   omitTools?: boolean;
@@ -168,6 +187,7 @@ export function buildSystemBlocks(
   rootIndex?: string | null,
   memoryText?: string | null,
   distillMap?: string | null,
+  dialogueState?: string | null,
 ): SystemBlock[] {
   const blocks: SystemBlock[] = [];
   if (rootIndex?.trim()) {
@@ -181,6 +201,11 @@ export function buildSystemBlocks(
   // 预算不足时先丢它——丢了只影响效率，policy 丢了影响行为安全。
   if (distillMap?.trim()) {
     blocks.push({ name: "distillMap", text: distillMap, max: DISTILL_MAP_TOKEN_MAX });
+  }
+  // 对话状态（context_governance_plan §2.2）：比记忆更「属于本次对话」，
+  // 丢了会失去已经确立的结论与约束，所以排在记忆之后、policy 之前。
+  if (dialogueState?.trim()) {
+    blocks.push({ name: "dialogueState", text: dialogueState, max: DIALOGUE_STATE_TOKEN_MAX });
   }
   if (systemPrompt?.trim()) {
     blocks.push({ name: "policy", text: systemPrompt, max: POLICY_TOKEN_MAX });
@@ -207,10 +232,10 @@ export const ROOT_INDEX_BYTE_MAX = 1024;
 export const DISTILL_MAP_TOKEN_MAX = 1200;
 
 /**
- * 记忆块 token 上限（plan §6.5 报表里 `user` 是 1500）。
- * 8 条记忆 × 每条约 150 token，留够余量；超限时整块丢弃而不是截断成半条。
+ * 对话状态块的 token 上限（context_governance_plan §2.2）。
+ * 定义在 `chat/dialogue-state.ts`；这里转发，保持块上限只有一处来源。
  */
-export const MEMORY_TOKEN_MAX = 1500;
+export { DIALOGUE_STATE_TOKEN_MAX } from "./dialogue-state.js";
 
 /**
  * 读取根索引供注入。任何失败都退回「不注入」，不影响本轮对话：
@@ -265,6 +290,8 @@ type BudgetBuildInput = {
   memoryText?: string | null;
   /** 蒸馏地图（plan_distill §4）。为空则不注入。 */
   distillMap?: string | null;
+  /** 心得会话的「当前有效」状态块（context_governance_plan §2.2）。为空则不注入。 */
+  dialogueState?: string | null;
   history: Message[];
   userMessage: Message;
   maxTokens: number;
@@ -285,7 +312,13 @@ function buildBudgetMessages(input: BudgetBuildInput): { messages: Message[]; re
   return assembleContextBudget({
     userMessage: input.userMessage,
     history,
-    systemBlocks: buildSystemBlocks(input.systemPrompt, input.rootIndex, input.memoryText, input.distillMap),
+    systemBlocks: buildSystemBlocks(
+      input.systemPrompt,
+      input.rootIndex,
+      input.memoryText,
+      input.distillMap,
+      input.dialogueState,
+    ),
     contextMaxTokens: input.config.contextMaxTokens,
     modelContextWindow: modelConfig?.contextWindow,
     maxTokens: input.maxTokens,
@@ -435,7 +468,9 @@ type LoopEvent =
   | { type: "toolCall"; name: string; input: Record<string, unknown>; callId: string }
   | { type: "toolResult"; name: string; content: string; isError: boolean; callId: string }
   /** 生成速度快照（节流推送，思考/正文/工具参数一视同仁累计） */
-  | { type: "tokenSpeed"; snapshot: TokenSpeedSnapshot };
+  | { type: "tokenSpeed"; snapshot: TokenSpeedSnapshot }
+  /** 一轮工具往返结束，循环即将进入下一轮 */
+  | { type: "loopProgress"; progress: LoopProgress };
 
 interface AgenticLoopResult {
   extraMessages: Message[];
@@ -498,8 +533,10 @@ async function* runAgenticLoop(
   let accumulatedUsage: NormalizedUsage | null = null;
   let contextUsage: NormalizedUsage | null = null;
   let reasoningBuffer: string | null = null;
+  let roundCount = 0;
 
   while (toolCallCount < maxToolCalls) {
+    roundCount += 1;
     reasoningBuffer = null;
     if (signal?.aborted) return { extraMessages, finalText: null, accumulatedUsage, contextUsage, cancelled: true };
 
@@ -599,6 +636,7 @@ async function* runAgenticLoop(
           tool_call_id: call.id,
         });
       }
+      yield { type: "loopProgress", progress: { round: roundCount, toolCalls: toolCallCount, maxToolCalls } };
     } else {
       return { extraMessages, finalText: response.content, finalReasoning: reasoningBuffer, accumulatedUsage, contextUsage };
     }
@@ -627,10 +665,12 @@ export async function* runAgenticLoopStreaming(
   let accumulatedUsage: NormalizedUsage | null = null;
   let contextUsage: NormalizedUsage | null = null;
   let reasoningBuffer: string | null = null;
+  let roundCount = 0;
   // 生成速度：思考/正文/工具参数一视同仁累计，跨工具轮次不重置
   const speed = new TokenSpeedTracker();
 
   while (toolCallCount < maxToolCalls) {
+    roundCount += 1;
     reasoningBuffer = null;
     if (signal?.aborted) return { extraMessages, finalText: null, accumulatedUsage, contextUsage, cancelled: true };
 
@@ -755,6 +795,7 @@ export async function* runAgenticLoopStreaming(
           tool_call_id: call.id,
         });
       }
+      yield { type: "loopProgress", progress: { round: roundCount, toolCalls: toolCallCount, maxToolCalls } };
     } else {
       // 正常结束：附带结束快照，用真实 outputTokens 供前端算精确平均
       return {
@@ -776,6 +817,44 @@ export async function* runAgenticLoopStreaming(
     contextUsage,
     maxToolCallsReached: true,
     speedFinal: speed.snapshot(Date.now(), accumulatedUsage?.outputTokens) ?? undefined,
+  };
+}
+
+/**
+ * 心得会话的上下文准备（context_governance_plan §2）。
+ *
+ * 只有 `app_state.reflectionsSessionId` 这一条会话走这里：
+ * 1. 装配前先尝试折叠（有游标之后、保护区之前的原文超过阈值时）；
+ * 2. 历史只保留游标之后的原文，已折叠的不再重复发送；
+ * 3. 取出该会话的「当前有效」一块，作为系统块注入。
+ *
+ * 其它会话原样返回，行为不变。
+ */
+async function prepareReflectionsContext(
+  sessionId: string,
+  history: Message[],
+  config: Config,
+): Promise<{ history: Message[]; dialogueState: string | null; reflections: boolean }> {
+  const appState = await loadAppState().catch(() => null);
+  if (!appState || appState.reflectionsSessionId !== sessionId) {
+    return { history, dialogueState: null, reflections: false };
+  }
+
+  // 折叠失败不能挡住本轮对话：记日志，继续用现有原文。
+  try {
+    await foldDialogueState(sessionId, config, logger);
+  } catch (error) {
+    logger.warn(`dialogue fold skipped: ${(error as Error).message}`, { sessionId });
+  }
+
+  const block = await loadCurrentDialogueBlock(sessionId).catch(() => ({ text: "", tokens: 0 }));
+  const state: DialogueSessionState = await loadDialogueState(sessionId)
+    .catch(() => ({ current: "", history: [] }));
+
+  return {
+    history: historyAfterCursor(history, state.foldedThrough),
+    dialogueState: block.text || null,
+    reflections: true,
   };
 }
 
@@ -815,6 +894,8 @@ export async function chat(
   const run = resolveChatRunSettings(config, options);
   const supportsImages = config.providers[run.providerName]?.models?.find((item) => item.id === run.model)?.modal === "vl";
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
+  // 心得会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
+  const prepared = await prepareReflectionsContext(sessionId, historyForProvider, config);
 
   const systemPromptContent = await loadSystemPrompt(config);
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
@@ -827,7 +908,8 @@ export async function chat(
     rootIndex,
     memoryText: memory.text,
     distillMap,
-    history: historyForProvider,
+    dialogueState: prepared.dialogueState,
+    history: prepared.history,
     userMessage: llmUserMessage,
     maxTokens,
   });
@@ -888,6 +970,7 @@ export async function chat(
     if (value.type === "toolCall") options.onToolCall?.(value.name, value.input, value.callId);
     else if (value.type === "toolResult") options.onToolResult?.(value.name, value.content, value.isError, value.callId);
     else if (value.type === "reasoning") options.onReasoningChunk?.(value.text);
+    else if (value.type === "loopProgress") options.onLoopProgress?.(value.progress);
   }
 
   const assistantMessage: Message = {
@@ -943,6 +1026,8 @@ export async function* chatStream(
   const run = resolveChatRunSettings(config, options);
   const supportsImages = config.providers[run.providerName]?.models?.find((item) => item.id === run.model)?.modal === "vl";
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
+  // 心得会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
+  const prepared = await prepareReflectionsContext(sessionId, historyForProvider, config);
 
   const systemPromptContent = await loadSystemPrompt(config);
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
@@ -955,7 +1040,8 @@ export async function* chatStream(
     rootIndex,
     memoryText: memory.text,
     distillMap,
-    history: historyForProvider,
+    dialogueState: prepared.dialogueState,
+    history: prepared.history,
     userMessage: llmUserMessage,
     maxTokens,
   });
@@ -1030,6 +1116,8 @@ export async function* chatStream(
       options.onToolCall?.(value.name, value.input, value.callId);
     } else if (value.type === "toolResult") {
       options.onToolResult?.(value.name, value.content, value.isError, value.callId);
+    } else if (value.type === "loopProgress") {
+      options.onLoopProgress?.(value.progress);
     }
   }
 

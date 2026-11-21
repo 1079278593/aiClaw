@@ -67,7 +67,10 @@ function renderOne(source) {
     `<span>${formatTokens(source.tokens)} token</span>`,
     source.max ? `<span>/ 上限 ${formatTokens(source.max)}</span>` : "",
     `<span>${formatTokens(source.bytes)} 字节</span>`,
-    source.entries !== undefined ? `<span>${source.entries} 条</span>` : "",
+    // 记忆层：总条数与本轮实际注入条数分开显示，差额就是被配额挡掉的。
+    source.entries !== undefined
+      ? `<span>${source.injectedEntries ?? source.entries} / ${source.entries} 条注入</span>`
+      : "",
   ].filter(Boolean).join("");
 
   const editor = source.editable

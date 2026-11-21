@@ -60,8 +60,35 @@ export const LAYER_BYTE_MAX: Record<MemoryLayer, number> = {
 /** 每层 `_archive` 保留的份数（plan §3.4「保留最近 3 份」）。 */
 export const ARCHIVE_KEEP = 3;
 
-/** 每轮最多注入的条数（plan §8.2「5～8 条」）。 */
-export const INJECT_MAX = 8;
+/**
+ * 每层注入的条数上限，按层各自计算（context_governance_plan §1）。
+ *
+ * 四层不再共用一份名额：常驻层各有自己的条数，`longterm` 只在自己的额度里
+ * 按相关性取。条数是上限，token 硬顶见 `LAYER_TOKEN_MAX`，两者取更严的那个。
+ * 旧的 `INJECT_MAX`（全局 8 条）已删除，不要再加回来。
+ */
+export const LAYER_INJECT_MAX: Record<MemoryLayer, number> = {
+  user: 4,
+  focus: 3,
+  runtime: 3,
+  longterm: 5,
+};
+
+/**
+ * 每层注入的 token 硬顶。
+ *
+ * 合计 7500 就是整个记忆块的预算：超出硬顶时整条不注入，从该层最旧、
+ * 未置顶的开始丢，不写半条，也不占用别的层的额度。
+ */
+export const LAYER_TOKEN_MAX: Record<MemoryLayer, number> = {
+  user: 2000,
+  focus: 1500,
+  runtime: 1500,
+  longterm: 2500,
+};
+
+/** 记忆块（四层合计）的 token 上限，等于各层硬顶之和。 */
+export const MEMORY_TOKEN_MAX = 7500;
 
 export class MemoryError extends Error {
   constructor(message: string, readonly statusCode: number) {

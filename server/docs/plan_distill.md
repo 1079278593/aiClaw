@@ -174,7 +174,7 @@ rootIndex > memory > distillMap > policy
 具体是两件事：
 
 1. **同一份内容不重复注入**。若某条记忆条目与 `meta/overview.md` 的某行指向同一来源文件，注入时只保留记忆（更短）。
-2. **预算共享**。`memory + distillMap` 合计不超过 `MEMORY_TOKEN_MAX`（当前 1500）；超了先砍 `distillMap`（它是加速层）。
+2. 预算共享。`memory + distillMap` 合计不超过 `MEMORY_TOKEN_MAX`（记忆已改为按层配额，总上限 7500）；超了先砍 `distillMap`（它是加速层）。
 
 **这就是「联动」的全部**：不是互相写，而是在同一次上下文装配里**互斥与分账**。这样做的好处是任一侧坏掉都不影响另一侧——蒸馏算不出来，记忆照常注入。
 

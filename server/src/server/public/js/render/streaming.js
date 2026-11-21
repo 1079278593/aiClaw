@@ -207,7 +207,25 @@ export function createStreamingRenderer({ state }) {
     finishStreaming,
     removeTypingDots,
     setBubbleContent,
+    showLoopProgress,
   };
+}
+
+/**
+ * 显示/更新循环进度标签，例如「第 2 轮 · 已调用 5/10」。
+ * 放在气泡内容区之前，不参与消息正文。
+ */
+function showLoopProgress(bubble, progress) {
+  if (!bubble) return;
+  let badge = bubble.querySelector(".loop-progress-badge");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.className = "loop-progress-badge";
+    const content = bubble.querySelector(".message-content");
+    if (content) bubble.insertBefore(badge, content);
+    else bubble.appendChild(badge);
+  }
+  badge.textContent = `第 ${progress.round} 轮 · 已调用 ${progress.toolCalls}/${progress.maxToolCalls}`;
 }
 
 function insertBeforeMessageContent(bubble, node) {

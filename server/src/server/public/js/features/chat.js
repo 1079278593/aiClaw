@@ -290,7 +290,7 @@ export function createChatFeature({
   }
 
   function handleServerMessage(message) {
-    const scopedTypes = ["chatStart", "chatChunk", "chatReasoning", "chatSpeed", "chatEnd", "chatCancelled", "toolCall", "toolResult", "toolPermissionRequest"];
+    const scopedTypes = ["chatStart", "chatChunk", "chatReasoning", "chatSpeed", "chatEnd", "chatCancelled", "toolCall", "toolResult", "toolPermissionRequest", "loopProgress"];
     if (scopedTypes.includes(message.type) && message.sessionId && message.sessionId !== state.currentSessionId) {
       updateBackgroundSession(message);
       return;
@@ -324,6 +324,9 @@ export function createChatFeature({
         break;
       case "toolResult":
         handleToolResult(message);
+        break;
+      case "loopProgress":
+        if (state.streamingBubble) streaming.showLoopProgress(state.streamingBubble, message);
         break;
       case "chatChunk":
         if (state.streamingBubble) streaming.appendChunk(state.streamingBubble, message.chunk);

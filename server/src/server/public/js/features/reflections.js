@@ -50,9 +50,9 @@ export function createReflectionsFeature({ state, actions }) {
     const { data } = await requestJson("/api/reflections?view=tree");
     tree = (data.tree || []).filter((node) => node.kind === "directory");
     renderFolders();
-    renderStage();
-    syncPreview();
-  }
+      renderStage();
+      syncPreview();
+    }
 
   const FOLDER_ICON = `<svg class="reflections-folder-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.2c0-.7.6-1.2 1.2-1.2h3.6l1.5 1.7h7.5c.7 0 1.2.6 1.2 1.2v8.4c0 .7-.6 1.2-1.2 1.2H3.7c-.7 0-1.2-.5-1.2-1.2V5.2Z"/></svg>`;
   const CHEVRON_ICON = `<svg class="reflections-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>`;

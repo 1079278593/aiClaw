@@ -236,9 +236,11 @@ export const DEFAULT_CONFIG = {
       apiKey: "",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       models: [
-        { id: "GLM-4.5-Air", label: "GLM-4.5-Air" },
-        { id: "GLM-4.7", label: "GLM-4.7" },
-        { id: "GLM-5.1", label: "GLM-5.1" },
+        // contextWindow 取各家官方文档的「上下文长度」，用于 `min(contextMaxTokens, contextWindow)`。
+        // 不填会退回 contextMaxTokens，超窗时 provider 报错而预算表看起来仍然安全。
+        { id: "GLM-4.5-Air", label: "GLM-4.5-Air", contextWindow: 131_072 },
+        { id: "GLM-4.7", label: "GLM-4.7", contextWindow: 204_800 },
+        { id: "GLM-5.1", label: "GLM-5.1", contextWindow: 204_800 },
       ],
     },
     dashscope: {
@@ -246,25 +248,25 @@ export const DEFAULT_CONFIG = {
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       models: [
         { id: "qwen3.6-27b", label: "qwen3.6-27b" },
-        { id: "qwen3.6-flash", label: "qwen3.6-flash" },
-        { id: "qwen3.6-plus", label: "qwen3.6-plus" },
-        { id: "qwen-vl-max-latest", label: "qwen-vl-max-latest", modal: "vl" as const },
-        { id: "qwen-vl-plus-latest", label: "qwen-vl-plus-latest", modal: "vl" as const },
+        { id: "qwen3.6-flash", label: "qwen3.6-flash", contextWindow: 1_000_000 },
+        { id: "qwen3.6-plus", label: "qwen3.6-plus", contextWindow: 1_000_000 },
+        { id: "qwen-vl-max-latest", label: "qwen-vl-max-latest", modal: "vl" as const, contextWindow: 131_072 },
+        { id: "qwen-vl-plus-latest", label: "qwen-vl-plus-latest", modal: "vl" as const, contextWindow: 131_072 },
       ],
     },
     deepseek: {
       apiKey: "",
       baseUrl: "https://api.deepseek.com",
       models: [
-        { id: "deepseek-v4-flash", label: "v4-flash" },
-        { id: "deepseek-v4-pro", label: "v4-pro" },
+        { id: "deepseek-v4-flash", label: "v4-flash", contextWindow: 1_048_576 },
+        { id: "deepseek-v4-pro", label: "v4-pro", contextWindow: 1_048_576 },
       ],
     },
     commandcode: {
       apiKey: "",
       baseUrl: "https://api.commandcode.ai/provider/v1",
       models: [
-        { id: "z-ai/glm-5.3-flash", label: "glm-5.3-flash" },
+        { id: "z-ai/glm-5.3-flash", label: "glm-5.3-flash", contextWindow: 1_048_576 },
       ],
     },
   },

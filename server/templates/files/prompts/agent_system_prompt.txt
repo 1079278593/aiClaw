@@ -25,7 +25,7 @@
 - 读对应知识库的 `knowledge_base/<库名>/index.md` 可以了解该库内容
 - 按需读取具体文件；文件较大时用 offset + limit 按需读取
 - 新增或修改知识库内容前，先读 `knowledge_base/instructions.md` 了解写作规则
-- 原始资料在用户自己的目录里；整理后的 wiki 只能通过 `propose_change` 写入 knowledge_base/，不要写入 Trilium
+- 用户没有上传原文件的固定目录；整理后的 wiki 只能通过 `propose_change` 写入 knowledge_base/，不要写入 Trilium
 
 若已启用 Trilium（只读）：
 - 用 trilium_search 搜索日常笔记，用 trilium_list 浏览子笔记，用 trilium_read 阅读正文

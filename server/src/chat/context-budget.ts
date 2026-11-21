@@ -95,7 +95,7 @@ export function resetCalibration(): void {
 // ---- 预算装配 ----
 
 /** 系统块：按「可变性」从高到低排列，淘汰时先丢索引尾。 */
-export type SystemBlockName = "rootIndex" | "runtime" | "focus" | "user" | "distillMap" | "policy";
+export type SystemBlockName = "rootIndex" | "runtime" | "focus" | "user" | "distillMap" | "dialogueState" | "policy";
 
 export type SystemBlock = {
   name: SystemBlockName;

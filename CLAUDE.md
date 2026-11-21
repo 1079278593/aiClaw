@@ -27,8 +27,18 @@
 ## 专项设计
 - Provider 配置、模型能力和 thinking 参数：`server/docs/provider_api.md`
 - 对话截断、压缩、系统提示词和上下文控制：`server/docs/conversation_control_logic.md`
+- 对话循环（ReAct / Function Calling）、上下文装配时序与 token 累积：`server/docs/chat_loop_and_context.md`
+- 上下文治理（五格进窗口、记忆分层配额、历史里的大工具结果）：`server/docs/context_governance_plan.md`
 - 多会话切换与生成中状态保留：`server/docs/session_switch_flow.md`
 - 初始化流程、模板与更新策略：`server/docs/init_method.md`
 - Token 用量和费用统计：`server/docs/token_cost_stats.md`
 - 多端鉴权 / CORS / WS 凭证：`server/docs/multi_client.md`
 - 移动端连接、界面与会话运行时：`mobile/docs/client_surfaces.md`、`mobile/docs/session_runtime.md`
+
+## 视觉设计
+- 视觉规范：`design/`，从 [design/README.md](design/README.md) 看索引
+  - [01 基础设计知识](design/01-foundations.md)：颜色、字体、间距、起步配方
+  - [02 Token 三层](design/02-tokens.md)：角色槽位表、双端策略、Android 取舍、现状 bug
+  - [03 组件](design/03-components.md)：按钮、输入、卡片、列表、弹窗
+  - [04 跨页面模式](design/04-patterns.md)：空状态、加载、错误、动效
+- 颜色值落点：Web 端 `server/src/server/public/styles/tokens.css`，移动端 `mobile/lib/ui/ai_theme.dart`

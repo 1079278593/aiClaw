@@ -53,6 +53,18 @@
       background: transparent;
     }
 
+    .loop-progress-badge {
+      display: inline-block;
+      margin: 0 0 6px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--muted);
+      color: var(--muted-foreground);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+    }
+
     /* Tighten spacing between consecutive blocks that belong to the same agent
        round.  CSS margin-collapse picks the MAX of two adjacent vertical
        margins, so we must shrink BOTH sides — preceding margin-bottom AND

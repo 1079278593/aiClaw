@@ -178,6 +178,8 @@ export async function processChatMessage(options: {
       omitTools: organizing,
       onToolCall: (name, input, callId) => sendChatEvent({ type: "toolCall", name, input, callId }),
       onToolResult: (name, resultContent, isError, callId) => sendChatEvent({ type: "toolResult", name, content: resultContent, isError, callId }),
+      onLoopProgress: (progress) =>
+        sendChatEvent({ type: "loopProgress", round: progress.round, toolCalls: progress.toolCalls, maxToolCalls: progress.maxToolCalls }),
       checkPermission: async (toolName, input) => {
         // 分级授权：safe 免确认；session 同会话同类只问一次；always 每次都问。
         // writePermOpen 仍然代表「本会话已全量放行」，保留给旧前端开关。

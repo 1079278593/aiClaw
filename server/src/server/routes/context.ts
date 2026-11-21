@@ -18,6 +18,7 @@
  */
 
 import { ContextSourceError, collectContextSources, writeContextSources } from "../../context/sources.js";
+import { getTools } from "../../tools/registry.js";
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson } from "../http-types.js";
 
@@ -28,10 +29,12 @@ export const handleContextRoutes: RouteHandler = async ({ req, res, url, config 
     injectRootIndex: Boolean(config.injectRootIndex),
     injectDistillMap: Boolean(config.injectDistillMap),
   };
+  // 工具定义每轮都随请求发出，属于固定成本；不带上它会让报表系统性少报。
+  const query = { ...switches, tools: getTools() };
 
   if (req.method === "GET") {
     try {
-      sendJson(res, await collectContextSources(switches));
+      sendJson(res, await collectContextSources(query));
     } catch (error) {
       sendJson(res, { error: (error as Error).message || "读取上下文来源失败" }, 500);
     }
@@ -72,7 +75,7 @@ export const handleContextRoutes: RouteHandler = async ({ req, res, url, config 
       // 部分失败按 400 返回：前端需要逐条展示原因，但仍带上已保存的列表与最新统计。
       sendJson(res, {
         ...result,
-        overview: await collectContextSources(switches).catch(() => null),
+        overview: await collectContextSources(query).catch(() => null),
         error: result.failed.map((item) => `${item.id}: ${item.error}`).join("；"),
       }, 400);
       return true;
@@ -80,7 +83,7 @@ export const handleContextRoutes: RouteHandler = async ({ req, res, url, config 
 
     sendJson(res, {
       ...result,
-      overview: await collectContextSources(switches),
+      overview: await collectContextSources(query),
     });
     return true;
   }

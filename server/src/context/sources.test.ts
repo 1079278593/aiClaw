@@ -16,6 +16,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { estimateTokens } from "../chat/context-budget.js";
 import { MEMORY_TOKEN_MAX, POLICY_TOKEN_MAX } from "../chat/index.js";
+import { LAYER_TOKEN_MAX } from "../memory/types.js";
 import {
   ContextSourceError,
   collectContextSources,
@@ -88,8 +89,8 @@ describe("collectContextSources", () => {
     expect(on.totalTokens).toBeGreaterThan(off.totalTokens);
   });
 
-  it("记忆四层共用同一个预算上限，超限时四层一起标记", async () => {
-    // 塞满 focus，让记忆整块超限。
+  it("记忆四层各有自己的上限，超限只标记超的那一层", async () => {
+    // 塞满 focus，让它超过自己的 1500 token 硬顶。
     const body = Array.from({ length: 60 }, (_, index) => `## 条目${index}\n\n${"内容".repeat(120)}`).join("\n\n");
     await writeFile(path.join(base, "agents", "main", "memory", "focus.md"), body, "utf-8");
 
@@ -97,11 +98,18 @@ describe("collectContextSources", () => {
     const focus = overview.sources.find((item) => item.id === "focus");
     const user = overview.sources.find((item) => item.id === "user");
 
-    expect(focus?.max).toBe(MEMORY_TOKEN_MAX);
-    expect(user?.max).toBe(MEMORY_TOKEN_MAX);
+    // 配额按层切分：focus 用 focus 的硬顶，不再共用一个记忆块上限。
+    expect(focus?.max).toBe(LAYER_TOKEN_MAX.focus);
+    expect(user?.max).toBe(LAYER_TOKEN_MAX.user);
     expect(focus?.overLimit).toBe(true);
-    // 共享预算：focus 撑爆后，同属记忆块的 user 也标记为超限，避免误导成「user 还安全」。
-    expect(user?.overLimit).toBe(true);
+    // 别的层不该被 focus 撑爆而一起标记超限。
+    expect(user?.overLimit).toBe(false);
+  });
+
+  it("各层硬顶之和等于记忆块总上限", () => {
+    const sum = LAYER_TOKEN_MAX.user + LAYER_TOKEN_MAX.focus
+      + LAYER_TOKEN_MAX.runtime + LAYER_TOKEN_MAX.longterm;
+    expect(sum).toBe(MEMORY_TOKEN_MAX);
   });
 
   it("记忆层的展示内容是注入形态，但编辑文本是磁盘原文（避免写回时套娃）", async () => {
@@ -220,5 +228,42 @@ describe("租户隔离", () => {
     const overview = await asTenant(() => collectContextSources(switches));
     const constitution = overview.sources.find((item) => item.id === "constitution");
     expect(constitution?.tokens).toBe(estimateTokens("租户宪法"));
+  });
+});
+
+describe("工具定义计入固定成本", () => {
+  // 工具定义不在任何文件里，但每轮都随请求发出。
+  // 不列入清单会让「每轮固定成本」系统性少报，页面数字就是假的。
+  const tool = {
+    name: "read",
+    description: "读一个文件",
+    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  };
+
+  it("列出 tools 块，且 token 按真实序列化口径计算", async () => {
+    const overview = await asTenant(() => collectContextSources({ ...switches, tools: [tool] }));
+    const tools = overview.sources.find((item) => item.id === "tools");
+    expect(tools).toBeDefined();
+    expect(tools?.always).toBe(true);
+    expect(tools?.editable).toBe(false);
+    // 口径 = 发给 LLM 的 `{type,function:{name,description,parameters}}` 数组
+    const payload = JSON.stringify([{
+      type: "function",
+      function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+    }]);
+    expect(tools?.tokens).toBe(estimateTokens(payload));
+    expect(tools?.tokens).toBeGreaterThan(estimateTokens(tool.name));
+  });
+
+  it("工具 token 累加进 totalTokens，而不是只显示不计数", async () => {
+    const withoutTools = await asTenant(() => collectContextSources(switches));
+    const withTools = await asTenant(() => collectContextSources({ ...switches, tools: [tool] }));
+    const tools = withTools.sources.find((item) => item.id === "tools");
+    expect(withTools.totalTokens).toBe(withoutTools.totalTokens + (tools?.tokens ?? 0));
+  });
+
+  it("不传 tools 时不出这一块（旧调用点与测试不受影响）", async () => {
+    const overview = await asTenant(() => collectContextSources(switches));
+    expect(overview.sources.some((item) => item.id === "tools")).toBe(false);
   });
 });

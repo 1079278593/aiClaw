@@ -85,5 +85,6 @@ export type ServerMessage =
   | { type: "chatCancelled"; sessionId: string; runId: string; sequence: number; fullResponse: string }
   | { type: "toolCall"; sessionId: string; runId: string; sequence: number; name: string; input: Record<string, unknown>; callId: string }
   | { type: "toolResult"; sessionId: string; runId: string; sequence: number; name: string; content: string; isError: boolean; callId: string }
+  | { type: "loopProgress"; sessionId: string; runId: string; sequence: number; round: number; toolCalls: number; maxToolCalls: number }
   | { type: "toolPermissionRequest"; sessionId: string; runId: string; sequence: number; requestId: string; toolName: string; risk?: "safe" | "session" | "always"; details: Record<string, string> }
   | { type: "error"; message: string; sessionId?: string; runId?: string; sequence?: number };

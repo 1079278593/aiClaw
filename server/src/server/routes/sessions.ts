@@ -1,4 +1,5 @@
 import { compactSession } from "../../chat/compaction.js";
+import { foldDialogueState } from "../../chat/dialogue-fold.js";
 import { loadAppState } from "../../app-state/index.js";
 import { createSession, deleteSession, listSessions, loadSession, renameSession, truncateSession } from "../../session/index.js";
 import type { RouteHandler } from "../http-types.js";
@@ -56,11 +57,41 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
   const compactMatch = /^\/api\/sessions\/([^/]+)\/compact$/.exec(url.pathname);
   if (compactMatch && req.method === "POST") {
     try {
+      const sessionId = compactMatch[1];
+      const appState = await loadAppState();
+      // 心得会话：走增量折叠，不重写历史，也不看 8000 token 阈值。
+      // 其它会话仍是 `compactSession`（整段摘要换掉旧历史）。
+      if (appState.reflectionsSessionId === sessionId) {
+        const folded = await foldDialogueState(sessionId, config, logger, { force: true });
+        if (folded.usage.length > 0) {
+          for (const record of folded.usage) await appendUsageRecord(record);
+        }
+        if (folded.outcome === "failed") {
+          sendJson(res, { error: `Compaction failed: ${folded.reason ?? "折叠失败"}` }, 500);
+          return true;
+        }
+        if (folded.outcome === "no-pending") {
+          sendJson(res, { error: "Compaction not needed: 没有待处理的原文" }, 400);
+          return true;
+        }
+        broadcast(toSessionMessage(await loadSession(sessionId)));
+        sendJson(res, {
+          ok: true,
+          archivedAs: null,
+          constraintsExtracted: false,
+          constraintCount: 0,
+          foldedThrough: folded.foldedThrough ?? null,
+          batches: folded.batches,
+          outcomes: folded.outcome,
+        });
+        return true;
+      }
+
       const data = await readJsonBody<{ keepRecentRounds?: number }>(req);
       const keepRecentRounds = typeof data.keepRecentRounds === "number" ? data.keepRecentRounds : undefined;
-      const result = await compactSession(compactMatch[1], config, logger, keepRecentRounds);
+      const result = await compactSession(sessionId, config, logger, keepRecentRounds);
       if (result.usage) await appendUsageRecord(result.usage);
-      broadcast(toSessionMessage(await loadSession(compactMatch[1])));
+      broadcast(toSessionMessage(await loadSession(sessionId)));
       sendJson(res, {
         ok: true,
         archivedAs: result.archivedAs,

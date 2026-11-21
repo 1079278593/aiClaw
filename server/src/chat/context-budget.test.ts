@@ -149,3 +149,31 @@ describe("27. 校准因子按 provider/model 独立，冷启动 1.0", () => {
     expect(getCalibrationFactor("zai", "GLM-4.5-Air")).toBe(0.5);
   });
 });
+
+describe("窗口取 min(contextMaxTokens, model.contextWindow)", () => {
+  // 这条路径此前完全没测：模型未声明 contextWindow 时会静默信任
+  // contextMaxTokens（可能被手填成远超真实窗口的值），provider 超窗报错，
+  // 而预算表看起来还很安全。断言的是「never exceed 模型真实窗口」。
+  const base = {
+    userMessage: msg("user", "你好"),
+    history: [],
+    systemBlocks: [],
+    maxTokens: 16_384,
+  };
+
+  it("模型窗口更小时以模型窗口为准", () => {
+    const result = assembleContextBudget({ ...base, contextMaxTokens: 500_000, modelContextWindow: 131_072 });
+    expect(result.report.window).toBe(131_072);
+    expect(result.report.available).toBe(131_072 - 16_384);
+  });
+
+  it("contextMaxTokens 更小时以它为准（不因模型窗口大就放开）", () => {
+    const result = assembleContextBudget({ ...base, contextMaxTokens: 100_000, modelContextWindow: 1_048_576 });
+    expect(result.report.window).toBe(100_000);
+  });
+
+  it("模型未声明窗口时退回 contextMaxTokens", () => {
+    const result = assembleContextBudget({ ...base, contextMaxTokens: 100_000 });
+    expect(result.report.window).toBe(100_000);
+  });
+});

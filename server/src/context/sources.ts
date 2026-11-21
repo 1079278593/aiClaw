@@ -17,16 +17,19 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { estimateTokens } from "../chat/context-budget.js";
+import { DIALOGUE_STATE_TOKEN_MAX, loadDialogueState } from "../chat/dialogue-state.js";
+import { loadAppState } from "../app-state/index.js";
 import {
   DISTILL_MAP_TOKEN_MAX,
-  MEMORY_TOKEN_MAX,
   POLICY_TOKEN_MAX,
   ROOT_INDEX_TOKEN_MAX,
 } from "../chat/index.js";
 import { getPaths } from "../config/paths.js";
 import { OVERVIEW_BYTE_MAX, distillRoot } from "../distill/store.js";
+import { buildMemoryInjection } from "../memory/inject.js";
 import { layerFile, readLayer } from "../memory/store.js";
 import type { MemoryLayer } from "../memory/types.js";
+import { LAYER_TOKEN_MAX } from "../memory/types.js";
 
 /** 一个「每轮必带」的内容来源。 */
 export type ContextSource = {
@@ -63,6 +66,8 @@ export type ContextSource = {
   bytes: number;
   /** 条目数（仅多条目来源）。 */
   entries?: number;
+  /** 本轮实际注入的条目数（仅记忆层）。与 `entries` 的差额被条数或 token 上限挡掉。 */
+  injectedEntries?: number;
 };
 
 export type ContextOverview = {
@@ -74,6 +79,14 @@ export type ContextOverview = {
   switches: { injectRootIndex: boolean; injectDistillMap: boolean };
 };
 
+/** 工具定义的 token 估算口径，必须与 `toLLMTools` 的序列化一致。 */
+export function estimateToolTokens(tools: Array<{ name: string; description: string; inputSchema: unknown }>): number {
+  const payload = tools.map((tool) => ({
+    type: "function",
+    function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+  }));
+  return estimateTokens(JSON.stringify(payload));
+}
 export class ContextSourceError extends Error {
   constructor(message: string, readonly statusCode = 400) {
     super(message);
@@ -90,14 +103,14 @@ export class ContextSourceError extends Error {
  */
 const EDITABLE_IDS = new Set(["constitution", "constitutionFallback", "user", "runtime", "focus", "longterm", "distillMap"]);
 
-/** 各来源的 token 上限。记忆四层共用 `MEMORY_TOKEN_MAX` 这一个预算块。 */
+/** 各来源的 token 上限。记忆按层各自有硬顶（context_governance_plan §1）。 */
 const TOKEN_LIMITS: Record<string, number> = {
   constitution: POLICY_TOKEN_MAX,
   constitutionFallback: POLICY_TOKEN_MAX,
-  user: MEMORY_TOKEN_MAX,
-  runtime: MEMORY_TOKEN_MAX,
-  focus: MEMORY_TOKEN_MAX,
-  longterm: MEMORY_TOKEN_MAX,
+  user: LAYER_TOKEN_MAX.user,
+  runtime: LAYER_TOKEN_MAX.runtime,
+  focus: LAYER_TOKEN_MAX.focus,
+  longterm: LAYER_TOKEN_MAX.longterm,
   distillMap: DISTILL_MAP_TOKEN_MAX,
 };
 
@@ -145,6 +158,7 @@ function makeSource(input: {
   max?: number;
   maxBytes?: number;
   entries?: number;
+  injectedEntries?: number;
   /** 与同层其他来源共享预算时，用外部汇总值判断超限。 */
   overLimitTokens?: number;
 }): ContextSource {
@@ -167,6 +181,7 @@ function makeSource(input: {
       || (input.maxBytes !== undefined && Buffer.byteLength(input.content, "utf-8") > input.maxBytes),
     bytes: Buffer.byteLength(input.content, "utf-8"),
     ...(input.entries !== undefined ? { entries: input.entries } : {}),
+    ...(input.injectedEntries !== undefined ? { injectedEntries: input.injectedEntries } : {}),
   };
 }
 
@@ -178,6 +193,12 @@ export async function collectContextSources(options: {
   injectRootIndex: boolean;
   injectDistillMap: boolean;
   userDataDir?: string;
+  /**
+   * 本轮实际注册的工具。工具定义每轮都随请求发出，是一份真实的固定成本，
+   * 但它不在任何「文件」里，所以单独作为一块列出来。
+   * 不传则跳过这一块（测试与旧调用点不受影响）。
+   */
+  tools?: Array<{ name: string; description: string; inputSchema: unknown }>;
 }): Promise<ContextOverview> {
   const { userDataDir } = options;
   const paths = getPaths(userDataDir);
@@ -200,7 +221,8 @@ export async function collectContextSources(options: {
   }));
 
   // ---- 2. 记忆四层 ----
-  // user / focus / runtime 常驻；longterm 按相关性检索，条数不定，按「全部条目」上界估。
+  // 四层各自有「条数上限 + token 硬顶」（context_governance_plan §1），
+  // 不再共用一个名额池。这里按各层上界展示，实际注入量取两者更严的那个。
   const layers: Array<{ id: string; label: string; layer: MemoryLayer; role: string; always: boolean; note?: string }> = [
     { id: "user", label: "用户画像", layer: "user", role: "模型对「你是谁、偏好什么」的认知，恒定注入", always: true },
     { id: "focus", label: "当前关注点", layer: "focus", role: "当前在追什么，恒定注入（条目默认 pinned）", always: true },
@@ -222,16 +244,16 @@ export async function collectContextSources(options: {
     return { item, entries, raw };
   }));
 
-  // 记忆是**一个**预算块：四层合计与 MEMORY_TOKEN_MAX 比较，不是每层各占一份。
-  const memoryTokensTotal = prepared.reduce(
-    (sum, { item, entries }) => sum + estimateTokens(renderMemoryBlock(
-      entries.map((entry) => ({ layer: item.layer, text: entry.text })),
-    )),
-    0,
-  );
+  // 各层「本轮实际会注入几条」：必须走与真实请求同一个选择函数，
+  // 自己再算一遍就会和对话时的结果不一致（页面上报的数字也就不可信了）。
+  const quotaCounts = await buildMemoryInjection("", {
+    layers: layers.map((item) => item.layer),
+    userDataDir,
+  }).then((injection) => injection.layerCounts).catch(() => ({}) as Partial<Record<MemoryLayer, number>>);
 
   for (const { item, entries, raw } of prepared) {
     const content = renderMemoryBlock(entries.map((entry) => ({ layer: item.layer, text: entry.text })));
+    const cap = LAYER_TOKEN_MAX[item.layer];
     sources.push(makeSource({
       id: item.id,
       label: item.label,
@@ -241,9 +263,30 @@ export async function collectContextSources(options: {
       always: item.always,
       content,
       editText: raw,
-      max: MEMORY_TOKEN_MAX,
+      max: cap,
       entries: entries.length,
-      overLimitTokens: memoryTokensTotal,
+      injectedEntries: quotaCounts[item.layer] ?? 0,
+    }));
+  }
+
+  // ---- 2.5 心得会话的对话状态（context_governance_plan §2.2）----
+  // 只对那一条会话生效，因此不算「每轮固定成本」；列出来是为了让用户看到
+  // 折叠之后到底往窗口里补了多大一块。
+  const reflectionsSessionId = (await loadAppState(userDataDir).catch(() => null))?.reflectionsSessionId;
+  if (reflectionsSessionId) {
+    const state = await loadDialogueState(reflectionsSessionId, userDataDir).catch(() => null);
+    const current = state?.current?.trim() ?? "";
+    sources.push(makeSource({
+      id: "dialogueState",
+      label: "对话状态（当前有效）",
+      abs: paths.dialogueStateFile,
+      userDataDir,
+      role: "心得会话折叠后的「当前有效」一块；沿革只留档、不注入",
+      always: false,
+      editable: false,
+      readonlyReason: "由折叠流程按会话写入；手改会与游标不一致",
+      content: current,
+      max: DIALOGUE_STATE_TOKEN_MAX,
     }));
   }
 
@@ -297,14 +340,35 @@ export async function collectContextSources(options: {
   }
 
   const alwaysSources = sources.filter((item) => item.always);
+  // 工具定义：不在文件系统里，但每轮都进请求。放最后一块，避免打乱上面的优先级梯度。
+  const toolTokens = options.tools ? estimateToolTokens(options.tools) : 0;
+  if (options.tools && options.tools.length > 0) {
+    const names = options.tools.map((tool) => tool.name).join("、");
+    const synthetic = makeSource({
+      id: "tools",
+      label: "工具定义",
+      abs: getPaths(userDataDir).base,
+      userDataDir,
+      role: `${options.tools.length} 个工具的 name/description/参数 schema，每轮随请求发送`,
+      always: true,
+      editable: false,
+      readonlyReason: "由代码注册的工具自动生成，不来自文件",
+      content: names,
+    });
+    // 内容栏只有工具名（可读），token 用真实序列化口径覆盖——
+    // 否则把工具名当内容算会严重低估（少一个数量级）。
+    synthetic.tokens = toolTokens;
+    synthetic.overLimit = false;
+    sources.push(synthetic);
+  }
+
   return {
     sources,
-    totalTokens: alwaysSources.reduce((sum, item) => sum + item.tokens, 0),
+    totalTokens: alwaysSources.reduce((sum, item) => sum + item.tokens, 0) + toolTokens,
     totalMax: alwaysSources.reduce((sum, item) => sum + (item.max ?? 0), 0),
     switches: { injectRootIndex: options.injectRootIndex, injectDistillMap: options.injectDistillMap },
   };
 }
-
 /** id → 绝对路径。只认白名单。 */
 function resolveEditable(id: string, userDataDir?: string): string {
   const paths = getPaths(userDataDir);

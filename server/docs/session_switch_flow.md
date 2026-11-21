@@ -38,7 +38,7 @@ session A  ── run A-2 ── chatStart / ...
 | `runId` | 事件属于该会话的哪一次生成 |
 | `sequence` | 该运行内单调递增的事件序号 |
 
-适用事件：`chatStart`、`chatChunk`、`chatReasoning`、`toolCall`、`toolResult`、`toolPermissionRequest`、`chatEnd`、`chatCancelled`。
+适用事件：`chatStart`、`chatChunk`、`chatReasoning`、`toolCall`、`toolResult`、`loopProgress`、`toolPermissionRequest`、`chatEnd`、`chatCancelled`。
 
 `processChatMessage` 的所有事件均使用 `sendToClient()` 直发给发起请求的 WebSocket 客户端。服务端不根据 `client.sessionId` 过滤聊天事件；它只是用于日志和最近会话记录。
 

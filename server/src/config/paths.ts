@@ -64,6 +64,11 @@ export function getPaths(userDataDir?: string) {
     agentSystemPromptFile: path.join(base, "files", "prompts", "agent_system_prompt.txt"),
     /** 单一来源的首选宪法（plan §8.1）；不存在时回退 agentSystemPromptFile。 */
     agentConstitutionFile: path.join(base, "agents", "main", "AGENT.md"),
+    /**
+     * 心得会话的对话状态（context_governance_plan §2.2）。
+     * 放在会话文件之外：删会话不删它，新建会话也不继承别的会话的块。
+     */
+    dialogueStateFile: path.join(base, "agents", "main", "dialogue-state.md"),
     compactionPromptFile: path.join(base, "files", "prompts", "compaction_prompt.txt"),
     knowledgeInstructionsFile: path.join(base, "knowledge_base", "instructions.md"),
     installedTemplatesFile: path.join(base, ".installed_templates.json"),
