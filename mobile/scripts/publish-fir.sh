@@ -277,6 +277,40 @@ build_ios() {
   (cd "$ROOT" && flutter pub get && flutter build ipa --export-method="$IOS_EXPORT_METHOD" "${ver_args[@]}")
 }
 
+# 打包之前先确认本机有分发证书。
+#
+# `flutter build ipa` 会先花一分多钟 archive，到 exportArchive 才报
+# `No signing certificate "iOS Distribution" found`，而且**退出码仍是 0**。
+# 证书缺失是环境问题、不可能靠重试解决，所以提前到最前面拦，一句话说清怎么办，
+# 省掉那一分钟的等待和一堆重复报错。
+#
+# 只查 ad-hoc / enterprise：development 导出用开发证书，本来就不需要分发证书。
+preflight_ios_signing() {
+  case "$IOS_EXPORT_METHOD" in
+    ad-hoc | enterprise) ;;
+    *) return 0 ;;
+  esac
+  local identities
+  identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  # Apple Distribution 是新名，iOS Distribution 是旧名，两者任一即可。
+  if printf '%s' "$identities" | grep -Eq '"(Apple|iPhone) Distribution:'; then
+    return 0
+  fi
+  echo "错误: 本机没有分发证书（Apple Distribution / iOS Distribution）。" >&2
+  echo "      导出 $IOS_EXPORT_METHOD 包必须要它；现在打包会在最后一步失败，且不会产出 IPA。" >&2
+  echo "" >&2
+  echo "      本机现有签名身份：" >&2
+  printf '%s\n' "$identities" | sed 's/^/        /' >&2
+  echo "" >&2
+  echo "      修复（任选其一）：" >&2
+  echo "        1) Xcode → Settings → Accounts → 选中账号 → Manage Certificates → + → Apple Distribution" >&2
+  echo "        2) developer.apple.com → Certificates → 新建 Apple Distribution，下载后双击安装" >&2
+  echo "        3) 若以前导出过 .p12 备份，双击导入 login 钥匙串即可" >&2
+  echo "" >&2
+  echo "      装好后确认能看到 Apple Distribution：security find-identity -v -p codesigning" >&2
+  exit 1
+}
+
 find_ipa() {
   local ipa_dir="$ROOT/build/ios/ipa"
   local ipa
@@ -284,19 +318,17 @@ find_ipa() {
   echo "$ipa"
 }
 
-/**
- * 断言这个 IPA 确实是本次刚构建的，且版本号对得上。
- *
- * 背景：`flutter build ipa` 在导出阶段失败时**不会**返回非零退出码，
- * 于是上一次发版留在 `build/ios/ipa/` 的旧包会被当成本次产物上传，
- * 而 fir 元数据、`pubspec.yaml`、提交记录都已经是新 build 号——
- * 用户下载到的二进制和标注的版本对不上，且没有任何一处报错。
- *
- * 所以这里三重校验，任一不过就停：
- * 1. 文件必须是本次流程开始之后写的（`RELEASE_STARTED_AT`）。
- * 2. `CFBundleVersion` 必须等于这次要发布的 build 号。
- * 3. `CFBundleShortVersionString` 必须等于营销版本。
- */
+# 断言这个 IPA 确实是本次刚构建的，且版本号对得上。
+#
+# 背景：`flutter build ipa` 在导出阶段失败时**不会**返回非零退出码，
+# 于是上一次发版留在 `build/ios/ipa/` 的旧包会被当成本次产物上传，
+# 而 fir 元数据、`pubspec.yaml`、提交记录都已经是新 build 号——
+# 用户下载到的二进制和标注的版本对不上，且没有任何一处报错。
+#
+# 所以这里三重校验，任一不过就停：
+# 1. 文件必须是本次流程开始之后写的（`RELEASE_STARTED_AT`）。
+# 2. `CFBundleVersion` 必须等于这次要发布的 build 号。
+# 3. `CFBundleShortVersionString` 必须等于营销版本。
 verify_ipa() {
   local ipa="$1"
   local label="$2"
@@ -377,6 +409,7 @@ if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "all" ]]; then
     echo "提示: 本项目不发布 Android，--all 按 --ios 处理。"
   fi
   if [[ "$SKIP_BUILD" -eq 0 ]]; then
+    preflight_ios_signing
     build_ios
   fi
   IPA="$(find_ipa)"
