@@ -41,6 +41,8 @@ SKIP_BUILD=0
 CHANGELOG=""
 DO_BUMP=1
 FORCE_BUMP=0
+# 本次流程开始的时刻（秒）。用来识别「上一次构建遗留的旧包」。
+RELEASE_STARTED_AT="$(date +%s)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -268,6 +270,9 @@ PY
 build_ios() {
   local -a ver_args
   ver_args=($(flutter_build_version_args))
+  # 先清掉上一次的导出产物：`flutter build ipa` 导出失败时退出码仍是 0，
+  # 残留的旧 IPA 会被 `find_ipa` 当成这次的产物。删掉之后，失败就一定找不到包。
+  rm -rf "$ROOT/build/ios/ipa"
   echo "→ flutter build ipa --export-method=$IOS_EXPORT_METHOD ${ver_args[*]}"
   (cd "$ROOT" && flutter pub get && flutter build ipa --export-method="$IOS_EXPORT_METHOD" "${ver_args[@]}")
 }
@@ -276,10 +281,82 @@ find_ipa() {
   local ipa_dir="$ROOT/build/ios/ipa"
   local ipa
   ipa="$(find "$ipa_dir" -maxdepth 1 -name '*.ipa' 2>/dev/null | head -1)"
-  if [[ -z "$ipa" ]]; then
-    ipa="$(find "$ROOT/build/ios" -name '*.ipa' 2>/dev/null | head -1)"
-  fi
   echo "$ipa"
+}
+
+/**
+ * 断言这个 IPA 确实是本次刚构建的，且版本号对得上。
+ *
+ * 背景：`flutter build ipa` 在导出阶段失败时**不会**返回非零退出码，
+ * 于是上一次发版留在 `build/ios/ipa/` 的旧包会被当成本次产物上传，
+ * 而 fir 元数据、`pubspec.yaml`、提交记录都已经是新 build 号——
+ * 用户下载到的二进制和标注的版本对不上，且没有任何一处报错。
+ *
+ * 所以这里三重校验，任一不过就停：
+ * 1. 文件必须是本次流程开始之后写的（`RELEASE_STARTED_AT`）。
+ * 2. `CFBundleVersion` 必须等于这次要发布的 build 号。
+ * 3. `CFBundleShortVersionString` 必须等于营销版本。
+ */
+verify_ipa() {
+  local ipa="$1"
+  local label="$2"
+  if [[ -z "$ipa" || ! -f "$ipa" ]]; then
+    echo "错误: 没有找到可上传的 IPA（$label）。导出阶段多半失败了。" >&2
+    echo "      先解决签名问题，再重跑。见 docs/release_fir.md。" >&2
+    exit 1
+  fi
+
+  # 1) 时间戳：必须是本次流程开始之后写出来的文件。
+  #    `--skip-build` 是「明确要发已有产物」，此时时间戳校验没有意义，跳过。
+  if [[ "$SKIP_BUILD" -eq 0 ]]; then
+    local mtime
+    mtime="$(stat -f %m "$ipa" 2>/dev/null || echo 0)"
+    if [[ "$mtime" -lt "$RELEASE_STARTED_AT" ]]; then
+      echo "错误: $ipa 是上一次构建留下的旧包（$(date -r "$mtime" '+%Y-%m-%d %H:%M:%S')）。" >&2
+      echo "      本次构建没有产出新 IPA，导出阶段失败了，不能拿旧包充数。" >&2
+      echo "      先解决签名问题，再重跑。见 docs/release_fir.md。" >&2
+      exit 1
+    fi
+  fi
+
+  # 2)/3) 版本号：解开 Info.plist 核对，不信任文件名和目录约定。
+  local info actual_short actual_build
+  info="$(mktemp -d)"
+  if ! unzip -o -q "$ipa" "Payload/*.app/Info.plist" -d "$info" 2>/dev/null; then
+    echo "错误: 无法从 $ipa 读取 Info.plist，包可能损坏。" >&2
+    rm -rf "$info"
+    exit 1
+  fi
+  actual_short="$(
+    python3 - "$info" <<'PY'
+import glob, plistlib, sys
+path = glob.glob(sys.argv[1] + "/Payload/*.app/Info.plist")
+if not path:
+    sys.exit(1)
+with open(path[0], "rb") as f:
+    print(plistlib.load(f).get("CFBundleShortVersionString", ""))
+PY
+  )"
+  actual_build="$(
+    python3 - "$info" <<'PY'
+import glob, plistlib, sys
+path = glob.glob(sys.argv[1] + "/Payload/*.app/Info.plist")
+if not path:
+    sys.exit(1)
+with open(path[0], "rb") as f:
+    print(plistlib.load(f).get("CFBundleVersion", ""))
+PY
+  )"
+  rm -rf "$info"
+
+  if [[ "$actual_short" != "$APP_VERSION" || "$actual_build" != "$APP_BUILD" ]]; then
+    echo "错误: IPA 版本与本次发布不一致：" >&2
+    echo "      包内是 ${actual_short:-?}+${actual_build:-?}，本次要发的是 ${APP_VERSION}+${APP_BUILD}。" >&2
+    echo "      拒绝上传——否则 fir 上标注的 build 号会与实际二进制不符。" >&2
+    exit 1
+  fi
+
+  echo "✓ 产物校验通过: $(basename "$ipa") → ${actual_short}+${actual_build}"
 }
 
 ios_release_type() {
@@ -303,6 +380,7 @@ if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "all" ]]; then
     build_ios
   fi
   IPA="$(find_ipa)"
+  verify_ipa "$IPA" "ios"
   upload_via_api "ios" "$IOS_BUNDLE_ID" "$IPA" "$(ios_release_type)"
 fi
 
