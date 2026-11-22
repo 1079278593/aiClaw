@@ -757,6 +757,51 @@ body.reflections-panel #doc-preview-content {
   padding: 8px;
 }
 
+.people-sessions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.people-sessions select {
+  flex: 1;
+  min-width: 0;
+}
+
+.people-auto-organize {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.people-auto-organize label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.people-auto-organize-state {
+  min-width: 1.2em;
+}
+
+/* 上次整理的结局：跑完了 / 跳过了 / 失败了。失败要看得见，否则等于没整理。 */
+.people-organize-status {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14em;
+}
+
+.people-organize-status-failed {
+  color: var(--danger);
+}
+
 .people-row {
   text-align: left;
   border: 0;

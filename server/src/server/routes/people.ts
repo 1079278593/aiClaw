@@ -3,6 +3,8 @@ import { getProviderCredential } from "../../config/index.js";
 import { createProvider } from "../../llm/index.js";
 import { normalizeImageBuffer } from "../../media/image.js";
 import { PeopleError, appendEntry, createPerson, deleteEntry, deletePerson, getPersonRecord, lastEntryPreview, listPeople, pageEntries, patchEntry, readEntries, updatePersonNames } from "../../people/store.js";
+import { isAutoOrganizeRunning } from "../../people/auto-organize.js";
+import { createSession, listPersonSessions } from "../../session/index.js";
 import { parseRecognition, RECOGNIZE_PROMPT } from "../../people/recognize.js";
 import { readMultipart } from "../form.js";
 import type { RouteHandler } from "../http-types.js";
@@ -14,6 +16,7 @@ export const handlePeopleRoutes: RouteHandler = async ({ req, res, url, config }
   const entryMatch = /^\/api\/people\/([A-Za-z0-9]+)\/entries\/([A-Za-z0-9]+)$/.exec(url.pathname);
   const entriesMatch = /^\/api\/people\/([A-Za-z0-9]+)\/entries$/.exec(url.pathname);
   const recognizeMatch = /^\/api\/people\/([A-Za-z0-9]+)\/recognize$/.exec(url.pathname);
+  const sessionsMatch = /^\/api\/people\/([A-Za-z0-9]+)\/sessions$/.exec(url.pathname);
   const personMatch = /^\/api\/people\/([A-Za-z0-9]+)$/.exec(url.pathname);
 
   try {
@@ -38,7 +41,10 @@ export const handlePeopleRoutes: RouteHandler = async ({ req, res, url, config }
     }
 
     if (personMatch && req.method === "GET") {
-      sendJson(res, await getPersonRecord(personMatch[1]));
+      const record = await getPersonRecord(personMatch[1]);
+      // `organizing` 让界面知道后台整理还在跑：此刻简报和当前判断都还是旧的，
+      // 只显示「整理于 xx:xx」会让人以为没生效。
+      sendJson(res, { ...record, organizing: isAutoOrganizeRunning(personMatch[1]) });
       return true;
     }
 
@@ -81,6 +87,35 @@ export const handlePeopleRoutes: RouteHandler = async ({ req, res, url, config }
 
     if (recognizeMatch && req.method === "POST") {
       sendJson(res, await recognizeImages(recognizeMatch[1], req, config));
+      return true;
+    }
+
+    if (sessionsMatch && (req.method === "GET" || req.method === "POST")) {
+      const personId = sessionsMatch[1];
+      await getPersonRecord(personId);
+      if (req.method === "GET") {
+        const sessions = await listPersonSessions(personId);
+        sendJson(res, {
+          sessions: sessions.map((session) => ({
+            id: session.id,
+            title: session.title,
+            updatedAt: session.updatedAt,
+            createdAt: session.createdAt,
+            personId: session.personId,
+          })),
+        });
+        return true;
+      }
+      const session = await createSession(undefined, undefined, personId);
+      sendJson(res, {
+        session: {
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          createdAt: session.createdAt,
+          personId: session.personId,
+        },
+      }, 201);
       return true;
     }
   } catch (error) {

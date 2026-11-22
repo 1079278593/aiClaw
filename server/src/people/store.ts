@@ -3,8 +3,11 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import path from "node:path";
 import { getPaths } from "../config/paths.js";
 import {
+  CURRENT_CHAR_LIMIT,
+  EMPTY_CURRENT,
   EMPTY_DIGEST,
   EMPTY_PROFILE,
+  currentBody,
   namesFromProfile,
   profileHeadingsComplete,
   profileWithName,
@@ -12,6 +15,36 @@ import {
   shrinksByHalf,
   summaryAllowsCondense,
 } from "./profile.js";
+
+/** 一次整理的结局。`ok` 表示写进去了，`skipped` 表示模型没给出正文，`failed` 表示调用出错。 */
+export type OrganizeStatus = "ok" | "skipped" | "failed";
+
+/**
+ * 「今天还要不要整理」的判据（plan_people_reply §4 成本）。
+ *
+ * 单独记这一份，而不是拿 `lastOrganize.at` 现算：
+ * 1. 跳过（`skipped`）也算「今天跑过了」，但它的 `at` 是完成时刻，
+ *    跨零点跑的那一趟会算到第二天去，用日期字段就没有这个歧义。
+ * 2. 用户切到「每条消息都整理」再切回来，`daily` 仍应认得今天已经跑过。
+ */
+export type OrganizeWindow = {
+  /** 北京时间日期（YYYY-MM-DD）。同一天只跑一轮自动整理。 */
+  day: string;
+};
+
+/**
+ * 最近一次整理的结果（自动与手动共用）。
+ *
+ * 为什么要留下这一份：自动整理跑在 `chatEnd` 之后，失败只进服务端日志，
+ * 界面上表现成「当前判断一直不变」，人无从判断是还没跑完还是已经坏了。
+ * `at` 是**完成这件事的时钟**，不是简报游标——游标可能因为今天没新原文而不动。
+ */
+export type OrganizeOutcome = {
+  at: string;
+  status: OrganizeStatus;
+  /** 失败或跳过时的原因，界面直接显示。 */
+  message?: string;
+};
 
 export type Person = {
   id: string;
@@ -21,6 +54,9 @@ export type Person = {
   createdAt: string;
   updatedAt: string;
   organizedAt?: string;
+  lastOrganize?: OrganizeOutcome;
+  /** 最近一次自动整理算在哪一天。`daily` 节奏用它判断今天是否需要再跑。 */
+  organizeWindow?: OrganizeWindow;
 };
 
 export type PersonEntry = {
@@ -76,12 +112,38 @@ function personFile(person: Person): string {
     updatedAt: person.updatedAt,
   };
   if (person.organizedAt) data.organizedAt = person.organizedAt;
+  if (person.lastOrganize) data.lastOrganize = person.lastOrganize;
+  if (person.organizeWindow) data.organizeWindow = person.organizeWindow;
   return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+function readOutcome(raw: unknown): OrganizeOutcome | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const status = record.status;
+  if (status !== "ok" && status !== "skipped" && status !== "failed") return undefined;
+  if (typeof record.at !== "string") return undefined;
+  return {
+    at: record.at,
+    status,
+    ...(typeof record.message === "string" && record.message ? { message: record.message } : {}),
+  };
+}
+
+function readWindow(raw: unknown): OrganizeWindow | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const day = (raw as Record<string, unknown>).day;
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+  return { day };
 }
 
 async function readPerson(id: string, userDataDir?: string): Promise<Person> {
   try {
-    const raw = JSON.parse(await readFile(path.join(personDir(id, userDataDir), "meta.json"), "utf-8")) as Person;
+    const raw = JSON.parse(await readFile(path.join(personDir(id, userDataDir), "meta.json"), "utf-8")) as Person & {
+      lastOrganize?: unknown;
+    };
+    const lastOrganize = readOutcome(raw.lastOrganize);
+    const organizeWindow = readWindow(raw.organizeWindow);
     return {
       id: raw.id,
       name: raw.name ?? "",
@@ -90,6 +152,8 @@ async function readPerson(id: string, userDataDir?: string): Promise<Person> {
       createdAt: raw.createdAt,
       updatedAt: raw.updatedAt,
       ...(raw.organizedAt ? { organizedAt: raw.organizedAt } : {}),
+      ...(lastOrganize ? { lastOrganize } : {}),
+      ...(organizeWindow ? { organizeWindow } : {}),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new PeopleError("文件不存在或已被删除", 404);
@@ -99,6 +163,34 @@ async function readPerson(id: string, userDataDir?: string): Promise<Person> {
 
 async function savePerson(person: Person, userDataDir?: string): Promise<void> {
   await writeAtomic(path.join(personDir(person.id, userDataDir), "meta.json"), personFile(person));
+}
+
+/**
+ * 同一个人的资料写盘串行。
+ *
+ * `digest.md` 是「整篇读出 → 拼接 → 原子写回」，两条整理路径（自动与手动）同时进来
+ * 必然丢一段；`meta.json` 的 `organizedAt` 也是这样被回退的。自动整理那边的
+ * `inFlight` 只管得住自动侧，管不住手动「整理」，所以锁要放在 store 这一层。
+ */
+const personWriteChains = new Map<string, Promise<void>>();
+
+export function withPersonLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const previous = personWriteChains.get(id) ?? Promise.resolve();
+  // 前一个写失败不能挡住后一个。
+  const run = previous.then(() => fn(), () => fn());
+  const tail = run.then(() => undefined, () => undefined);
+  personWriteChains.set(id, tail);
+  void tail.then(() => {
+    // 队尾跑完就摘掉，别让长驻进程按人累积。
+    if (personWriteChains.get(id) === tail) personWriteChains.delete(id);
+  });
+  return run;
+}
+
+/** 游标只前进：整理跑得久，期间别处可能已经推进过更远的位置。 */
+function laterStamp(a: string | undefined, b: string): string {
+  if (!a) return b;
+  return Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
 export function personLabels(person: Pick<Person, "name" | "nicknames" | "shortNames">): string[] {
@@ -161,18 +253,21 @@ export async function createPerson(name: string, userDataDir?: string): Promise<
   await writeAtomic(path.join(dir, "meta.json"), personFile(person));
   await writeAtomic(path.join(dir, "profile.md"), profileWithName(EMPTY_PROFILE, trimmed));
   await writeAtomic(path.join(dir, "digest.md"), EMPTY_DIGEST);
+  await writeAtomic(path.join(dir, "current.md"), EMPTY_CURRENT);
   await writeAtomic(path.join(dir, "entries.jsonl"), "");
   return { person, created: true };
 }
 
-export async function getPersonRecord(id: string, userDataDir?: string): Promise<{ person: Person; profile: string; digest: string }> {
+export async function getPersonRecord(id: string, userDataDir?: string): Promise<{ person: Person; profile: string; digest: string; current: string }> {
   const person = await readPerson(id, userDataDir);
   const dir = personDir(id, userDataDir);
-  const [profile, digest] = await Promise.all([
+  const [profile, digest, current] = await Promise.all([
     readFile(path.join(dir, "profile.md"), "utf-8"),
     readFile(path.join(dir, "digest.md"), "utf-8"),
+    // 阶段 4 之前建的目录没有 current.md，缺失按空判断处理，不让人打不开。
+    readFile(path.join(dir, "current.md"), "utf-8").catch(() => ""),
   ]);
-  return { person, profile, digest };
+  return { person, profile, digest, current };
 }
 
 export async function updatePersonNames(
@@ -328,14 +423,72 @@ export function personIdFromProfilePath(inputPath: string): string | undefined {
   return match?.[1];
 }
 
+export function personIdFromCurrentPath(inputPath: string): string | undefined {
+  const match = /^people\/([A-Za-z0-9]+)\/current\.md$/.exec(inputPath.replaceAll("\\", "/"));
+  return match?.[1];
+}
+
+/**
+ * 整篇替换 `current.md`（plan_people_reply §4：「同一次整理替换 current.md」）。
+ *
+ * 与 `digest.md` 相反，这里**不追加**：当前判断只保留最新一份，
+ * 否则每轮都多一段，很快又要截断。超过 1500 字时返回 `written: false`，
+ * 文件保持原样——这次不替换，而不是写进一份长文。
+ *
+ * 不碰 `organizedAt`：游标由 `appendDigest` 推进，两个文件各管各的。
+ */
+export async function replaceCurrent(
+  id: string,
+  markdown: string,
+  userDataDir?: string,
+): Promise<{ written: boolean; length: number }> {
+  const body = currentBody(markdown);
+  if (!body) return { written: false, length: 0 };
+  if (body.length > CURRENT_CHAR_LIMIT) return { written: false, length: body.length };
+  const file = path.join(personDir(id, userDataDir), "current.md");
+  await writeAtomic(file, `---\nschemaVersion: 1\n---\n\n${body}\n`);
+  return { written: true, length: body.length };
+}
+
 export async function appendDigest(id: string, paragraph: string, organizedAt: string, userDataDir?: string): Promise<void> {
   // 空内容 → no-op，不写盘（plan §3.3）。
   if (!paragraph.trim()) return;
-  const person = await readPerson(id, userDataDir);
-  const file = path.join(personDir(id, userDataDir), "digest.md");
-  const current = await readFile(file, "utf-8");
-  await writeAtomic(file, `${current.trimEnd()}\n\n${paragraph.trim()}\n`);
-  await savePerson({ ...person, organizedAt }, userDataDir);
+  await withPersonLock(id, async () => {
+    const person = await readPerson(id, userDataDir);
+    const file = path.join(personDir(id, userDataDir), "digest.md");
+    const current = await readFile(file, "utf-8");
+    await writeAtomic(file, `${current.trimEnd()}\n\n${paragraph.trim()}\n`);
+    await savePerson({ ...person, organizedAt: laterStamp(person.organizedAt, organizedAt) }, userDataDir);
+  });
+}
+
+/** 记一次整理的结局。只在 `meta.json` 上写这一小块，不与简报正文混在一起。 */
+export async function recordOrganizeOutcome(
+  id: string,
+  outcome: OrganizeOutcome,
+  userDataDir?: string,
+): Promise<void> {
+  await withPersonLock(id, async () => {
+    const person = await readPerson(id, userDataDir);
+    await savePerson({ ...person, lastOrganize: outcome }, userDataDir);
+  });
+}
+
+/**
+ * 记下「自动整理今天已经跑过」。
+ *
+ * 成功、跳过、失败都写：失败也算跑过，否则模型挂了的时候每条消息都会重试一次，
+ * 一天烧几十次同样的错误。真挂了要看 `lastOrganize.message`，不是靠重试。
+ */
+export async function markOrganizeDay(
+  id: string,
+  day: string,
+  userDataDir?: string,
+): Promise<void> {
+  await withPersonLock(id, async () => {
+    const person = await readPerson(id, userDataDir);
+    await savePerson({ ...person, organizeWindow: { day } }, userDataDir);
+  });
 }
 
 export async function writeProfileIfComplete(

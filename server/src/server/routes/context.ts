@@ -30,7 +30,13 @@ export const handleContextRoutes: RouteHandler = async ({ req, res, url, config 
     injectDistillMap: Boolean(config.injectDistillMap),
   };
   // 工具定义每轮都随请求发出，属于固定成本；不带上它会让报表系统性少报。
-  const query = { ...switches, tools: getTools() };
+  const query = {
+    ...switches,
+    tools: getTools(),
+    // 前端在会话里打开这一页时带上会话 id，才能看到这条会话自己的折叠状态；
+    // 不传则仍退回心得那条。
+    sessionId: url.searchParams.get("sessionId") ?? undefined,
+  };
 
   if (req.method === "GET") {
     try {

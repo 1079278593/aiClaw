@@ -1,7 +1,16 @@
 import { compactSession } from "../../chat/compaction.js";
 import { foldDialogueState } from "../../chat/dialogue-fold.js";
+import { loadDialogueState, removeDialogueState, resetDialogueCursor } from "../../chat/dialogue-state.js";
 import { loadAppState } from "../../app-state/index.js";
-import { createSession, deleteSession, listSessions, loadSession, renameSession, truncateSession } from "../../session/index.js";
+import {
+  createSession,
+  deleteSession,
+  listSessions,
+  loadSession,
+  renameSession,
+  setSessionFold,
+  truncateSession,
+} from "../../session/index.js";
 import type { RouteHandler } from "../http-types.js";
 import { readJsonBody, sendJson, toSessionMessage } from "../http-types.js";
 import { appendUsageRecord } from "../services/usage-store.js";
@@ -11,7 +20,7 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
     const appState = await loadAppState();
     // The reflections chat session is mobile-internal: keep it out of the chat list
     // (plan_reflections_chat.md §7.4 step 4).
-    const sessions = (await listSessions()).filter((s) => s.id !== appState.reflectionsSessionId);
+    const sessions = (await listSessions()).filter((s) => s.id !== appState.reflectionsSessionId && !s.personId);
     sendJson(res, { sessions });
     return true;
   }
@@ -46,7 +55,17 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
   }
   if (directMatch && req.method === "DELETE") {
     try {
-      await deleteSession(directMatch[1]);
+      const sessionId = directMatch[1];
+      // 先读会话：删完之后就拿不到 personId，也就分不清要不要清状态块。
+      const session = await loadSession(sessionId);
+      await deleteSession(sessionId);
+      // 人物分析会话的折叠状态只属于这一次分析，删会话就连块一起删；
+      // 心得会话的状态是人的长期结论，删会话保留（dialogue-state.ts 的既有语义）。
+      if (session.personId) {
+        await removeDialogueState(sessionId).catch((error) => {
+          logger.warn(`dialogue state not removed: ${(error as Error).message}`, { sessionId });
+        });
+      }
       sendJson(res, { ok: true });
     } catch {
       sendJson(res, { error: "Session not found" }, 404);
@@ -58,11 +77,16 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
   if (compactMatch && req.method === "POST") {
     try {
       const sessionId = compactMatch[1];
-      const appState = await loadAppState();
-      // 心得会话：走增量折叠，不重写历史，也不看 8000 token 阈值。
+      const target = await loadSession(sessionId);
+      // 需要折叠的会话（人物分析 / 心得）：走增量折叠，不重写历史，也不看 8000 token 阈值。
       // 其它会话仍是 `compactSession`（整段摘要换掉旧历史）。
-      if (appState.reflectionsSessionId === sessionId) {
-        const folded = await foldDialogueState(sessionId, config, logger, { force: true });
+      const foldBackfill = target.fold !== true && (await loadAppState()).reflectionsSessionId === sessionId;
+      if (target.fold === true || foldBackfill) {
+        if (foldBackfill) await setSessionFold(sessionId, true).catch(() => undefined);
+        const folded = await foldDialogueState(sessionId, config, logger, {
+          force: true,
+          domain: target.personId ? "person" : "reflections",
+        });
         if (folded.usage.length > 0) {
           for (const record of folded.usage) await appendUsageRecord(record);
         }
@@ -115,6 +139,9 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
         return true;
       }
       const session = await truncateSession(truncateMatch[1], data.messageId);
+      // 截断可能把游标指向的消息删掉。保留「当前有效」，只把游标归零，
+      // 否则 `pendingRange` 会一直返回 null，这条会话再也不会折叠。
+      if (session.fold) await resetDialogueCursor(session.id).catch(() => undefined);
       broadcast(toSessionMessage(session));
       sendJson(res, { ok: true, messageCount: session.messages.length });
     } catch (error) {

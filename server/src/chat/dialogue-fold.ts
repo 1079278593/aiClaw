@@ -67,6 +67,22 @@ export const FOLD_SYSTEM_PROMPT = `你的任务是把一段已经发生的对话
 3. 已被本批明确推翻的旧结论要删掉，不要同时留下两种说法。
 4. 输出总长控制在 2000 token 以内；实在放不下，优先保住硬约束与未决问题。`;
 
+/**
+ * 人物分析会话在折叠提示词末尾追加的两句（plan_people_reply §7 阶段 3）。
+ *
+ * 人物会话和心得会话的差别不在结构，而在**回法**：用户否定过的措辞、
+ * 已经排除的方案，下次装配时都要还在，否则模型会重提已经被否掉的建议。
+ */
+export const PERSON_FOLD_ADDENDUM = `5. 这是「帮我回复某个人」的分析会话。用户明确否定过的回法（措辞、语气、要不要点明、哪些话不能说）全部写入「硬约束」，逐字保留原话，不要改写成概括。
+6. 已经讨论过并排除的回法写入「已定结论」，每条写成「回法 + 为什么不要」。不要保留讨论过程，也不要把被排除的回法重新写成可以考虑的建议。`;
+
+/** 折叠所属场景，决定是否追加人物那两句。 */
+export type FoldDomain = "reflections" | "person";
+
+function promptFor(domain: FoldDomain): string {
+  return domain === "person" ? `${FOLD_SYSTEM_PROMPT}\n${PERSON_FOLD_ADDENDUM}` : FOLD_SYSTEM_PROMPT;
+}
+
 export type FoldResult = {
   /** 本次结果。 */
   outcome:
@@ -176,12 +192,13 @@ async function callFoldModel(
   options: CompletionOptions,
   previous: string,
   conversation: string,
+  domain: FoldDomain,
 ): Promise<{ text: string; usage?: UsageRecord }> {
   const response = await provider.complete(apiKey, [
     {
       id: "system",
       role: "system",
-      content: FOLD_SYSTEM_PROMPT,
+      content: promptFor(domain),
       timestamp: new Date().toISOString(),
     },
     {
@@ -212,7 +229,7 @@ export async function foldDialogueState(
   sessionId: string,
   config: Config,
   logger: Logger,
-  options: { force?: boolean; provider?: LLMProvider } = {},
+  options: { force?: boolean; provider?: LLMProvider; domain?: FoldDomain } = {},
 ): Promise<FoldResult> {
   const empty: FoldResult = { outcome: "no-session", batches: 0, processedMessages: 0, stateTokens: 0, usage: [] };
 
@@ -276,7 +293,7 @@ export async function foldDialogueState(
     const conversation = segment.map(serializeMessage).join("\n\n---\n\n");
     let result: { text: string; usage?: UsageRecord };
     try {
-      result = await callFoldModel(provider, built.apiKey, built.options, current, conversation);
+      result = await callFoldModel(provider, built.apiKey, built.options, current, conversation, options.domain ?? "reflections");
     } catch (error) {
       failure = `模型调用失败：${(error as Error).message}`;
       logger.warn(`dialogue fold batch failed: ${failure}`, { sessionId });

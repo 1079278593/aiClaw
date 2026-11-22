@@ -32,7 +32,7 @@ export function buildAugmentedUserContent(
   images: Array<{ url: string; path?: string }> | undefined,
   previewPath?: string,
   selectedPreviewText?: string,
-  extra?: { contextSuffix?: string; persistPlain?: boolean },
+  extra?: { contextSuffix?: string; persistPlain?: boolean; persistContent?: string },
 ): {
   llmUserContent: string | MessageContentPart[];
   persistedUserContent: string | MessageContentPart[];
@@ -41,6 +41,8 @@ export function buildAugmentedUserContent(
   const suffix = extra?.contextSuffix ?? buildPreviewContextSuffix(previewPath, selectedPreviewText);
   const augmentedText = suffix ? `${suffix}\n用户消息：${content}` : content;
   const llmUserContent = buildUserContent(augmentedText, images);
-  const persistedUserContent = extra?.persistPlain ? buildUserContent(content, images) : llmUserContent;
+  const persistedUserContent = extra?.persistPlain
+    ? buildUserContent(extra.persistContent ?? content, images)
+    : llmUserContent;
   return { llmUserContent, persistedUserContent, latestUserTextForLog: augmentedText };
 }

@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Message, MessageContentPart, Session } from "../types/index.js";
 import { logger } from "../logger/index.js";
-import { loadSession, addMessage, generateId, saveSession } from "../session/index.js";
+import { loadSession, addMessage, generateId, saveSession, setSessionFold } from "../session/index.js";
 import { createProvider } from "../llm/index.js";
 import type { CompletionOptions, CompletionResponse, StreamFinish } from "../llm/index.js";
 import type { Config, ProviderName } from "../config/index.js";
@@ -33,7 +33,7 @@ import {
 } from "./context-budget.js";
 import { buildMemoryInjection } from "../memory/inject.js";
 import { MEMORY_TOKEN_MAX } from "../memory/types.js";
-import { DIALOGUE_STATE_TOKEN_MAX, loadCurrentDialogueBlock, loadDialogueState } from "./dialogue-state.js";
+import { DIALOGUE_STATE_TOKEN_MAX, loadCurrentDialogueBlock, loadDialogueState, resetDialogueCursor } from "./dialogue-state.js";
 import type { DialogueSessionState } from "./dialogue-state.js";
 import { foldDialogueState, historyAfterCursor } from "./dialogue-fold.js";
 import { buildDistillMapInjection } from "../distill/inject.js";
@@ -821,40 +821,53 @@ export async function* runAgenticLoopStreaming(
 }
 
 /**
- * 心得会话的上下文准备（context_governance_plan §2）。
+ * 增量折叠会话的上下文准备（context_governance_plan §2 / plan_people_reply §7 阶段 3）。
  *
- * 只有 `app_state.reflectionsSessionId` 这一条会话走这里：
+ * 判据只有一条：`session.fold === true`。人物分析会话与心得会话都写这个字段，
+ * 普通聊天不写，行为与以前一致。
+ *
  * 1. 装配前先尝试折叠（有游标之后、保护区之前的原文超过阈值时）；
  * 2. 历史只保留游标之后的原文，已折叠的不再重复发送；
  * 3. 取出该会话的「当前有效」一块，作为系统块注入。
  *
- * 其它会话原样返回，行为不变。
+ * 心得会话是移动端懒建的、历史上没有写过 `fold`：这里做一次**惰性补写**，
+ * 让旧数据也走同一条判据，而不是再留一个「是不是心得会话」的旁路判断。
  */
-async function prepareReflectionsContext(
-  sessionId: string,
+async function prepareFoldContext(
+  session: Pick<Session, "id" | "fold" | "personId">,
   history: Message[],
   config: Config,
-): Promise<{ history: Message[]; dialogueState: string | null; reflections: boolean }> {
-  const appState = await loadAppState().catch(() => null);
-  if (!appState || appState.reflectionsSessionId !== sessionId) {
-    return { history, dialogueState: null, reflections: false };
+): Promise<{ history: Message[]; dialogueState: string | null }> {
+  if (session.fold !== true) {
+    const appState = await loadAppState().catch(() => null);
+    if (!appState || appState.reflectionsSessionId !== session.id) {
+      return { history, dialogueState: null };
+    }
+    await setSessionFold(session.id, true).catch((error) => {
+      logger.warn(`session fold backfill failed: ${(error as Error).message}`, { sessionId: session.id });
+    });
   }
 
   // 折叠失败不能挡住本轮对话：记日志，继续用现有原文。
   try {
-    await foldDialogueState(sessionId, config, logger);
+    const domain = session.personId ? "person" : "reflections";
+    const folded = await foldDialogueState(session.id, config, logger, { domain });
+    // 游标指向的消息已经不存在（会话被截断/改写过）：状态还有效，但游标悬空，
+    // 再不修就会永久停折。清掉游标让下一轮从现有原文重新开始收。
+    if (folded.outcome === "cursor-missing") {
+      await resetDialogueCursor(session.id).catch(() => undefined);
+    }
   } catch (error) {
-    logger.warn(`dialogue fold skipped: ${(error as Error).message}`, { sessionId });
+    logger.warn(`dialogue fold skipped: ${(error as Error).message}`, { sessionId: session.id });
   }
 
-  const block = await loadCurrentDialogueBlock(sessionId).catch(() => ({ text: "", tokens: 0 }));
-  const state: DialogueSessionState = await loadDialogueState(sessionId)
+  const block = await loadCurrentDialogueBlock(session.id).catch(() => ({ text: "", tokens: 0 }));
+  const state: DialogueSessionState = await loadDialogueState(session.id)
     .catch(() => ({ current: "", history: [] }));
 
   return {
     history: historyAfterCursor(history, state.foldedThrough),
     dialogueState: block.text || null,
-    reflections: true,
   };
 }
 
@@ -894,8 +907,8 @@ export async function chat(
   const run = resolveChatRunSettings(config, options);
   const supportsImages = config.providers[run.providerName]?.models?.find((item) => item.id === run.model)?.modal === "vl";
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
-  // 心得会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
-  const prepared = await prepareReflectionsContext(sessionId, historyForProvider, config);
+  // 需要折叠的会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
+  const prepared = await prepareFoldContext(session, historyForProvider, config);
 
   const systemPromptContent = await loadSystemPrompt(config);
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
@@ -1026,8 +1039,8 @@ export async function* chatStream(
   const run = resolveChatRunSettings(config, options);
   const supportsImages = config.providers[run.providerName]?.models?.find((item) => item.id === run.model)?.modal === "vl";
   const historyForProvider = sanitizeHistoryForProvider(session.messages, supportsImages);
-  // 心得会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
-  const prepared = await prepareReflectionsContext(sessionId, historyForProvider, config);
+  // 需要折叠的会话：先折叠、再只带游标之后的原文，并注入「当前有效」。其它会话原样。
+  const prepared = await prepareFoldContext(session, historyForProvider, config);
 
   const systemPromptContent = await loadSystemPrompt(config);
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);

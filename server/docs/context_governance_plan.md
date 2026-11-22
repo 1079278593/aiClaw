@@ -1,7 +1,7 @@
 # 上下文治理：已定规则
 
 > 面向「心得」模块的私人助理。配套机制说明见 `chat_loop_and_context.md`。
-> 状态：**已实现**（`memory/inject.ts`、`chat/dialogue-state.ts`、`chat/dialogue-fold.ts`，测试 `memory/quota.test.ts`、`chat/dialogue-state.test.ts`）。只覆盖心得那一条会话。
+> 状态：**已实现**（`memory/inject.ts`、`chat/dialogue-state.ts`、`chat/dialogue-fold.ts`，测试 `memory/quota.test.ts`、`chat/dialogue-state.test.ts`、`chat/person-fold.test.ts`）。判据是会话自己的 `fold: true`：心得那条会话与人物分析会话都走这套，普通聊天不走（见 `plan_people_reply.md` §7 阶段 3）。
 
 ## 0. 一次提问里有什么
 

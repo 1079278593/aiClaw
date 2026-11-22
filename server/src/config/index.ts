@@ -206,6 +206,10 @@ function mergeWithDefaults(userConfig: Partial<Config>): Config {
     injectRootIndex: userConfig.injectRootIndex ?? DEFAULT_CONFIG.injectRootIndex,
     injectDistillMap: userConfig.injectDistillMap ?? DEFAULT_CONFIG.injectDistillMap,
     autoRefreshDistill: userConfig.autoRefreshDistill ?? DEFAULT_CONFIG.autoRefreshDistill,
+    autoOrganize: userConfig.autoOrganize ?? DEFAULT_CONFIG.autoOrganize,
+    autoOrganizeCadence: userConfig.autoOrganizeCadence ?? DEFAULT_CONFIG.autoOrganizeCadence,
+    autoOrganizeDebounceMs: userConfig.autoOrganizeDebounceMs ?? DEFAULT_CONFIG.autoOrganizeDebounceMs,
+    autoOrganizeMinUnits: userConfig.autoOrganizeMinUnits ?? DEFAULT_CONFIG.autoOrganizeMinUnits,
     maxToolCalls: userConfig.maxToolCalls ?? DEFAULT_CONFIG.maxToolCalls,
     server: {
       port: userConfig.server?.port ?? DEFAULT_SERVER_CONFIG.port,

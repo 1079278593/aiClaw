@@ -124,7 +124,7 @@ function bindGlobalEvents() {
 async function boot() {
   initSettings();
   initAccountSettings();
-  initContextSources();
+  initContextSources({ state });
   documents.configureDocuments({
     showError: actions.showError,
   });

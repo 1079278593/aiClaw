@@ -186,6 +186,8 @@ export const CompactionConfigSchema = z.object({
   keepRecentRounds: z.number().int().min(0).max(10).default(0),
 });
 
+export const AutoOrganizeCadenceSchema = z.enum(["daily", "message"]);
+
 export const TavilyToolConfigSchema = z.object({
   enabled: z.boolean().default(false),
   apiKey: z.string().default(""),
@@ -279,6 +281,38 @@ export const DEFAULT_CONFIG = {
   injectRootIndex: false,
   injectDistillMap: false,
   autoRefreshDistill: false,
+  /**
+   * 人物页发消息后是否自动整理（plan_people_reply §4）。默认开：
+   * 这是阶段 4 的主行为，关掉它等于回到手工点「整理」。
+   * 每次发送多一次模型调用，用的是 `compaction` 那套便宜的模型。
+   */
+  autoOrganize: true,
+  /**
+   * 自动整理的节奏（plan_people_reply §4 成本）。
+   *
+   * `daily`（默认）：同一个人每个自然日（北京时间）最多整理一次。
+   * 原文照常按条落盘，当天没整理的会在第二天一次补齐——游标没前进就不会漏。
+   * `message`：旧行为，每条有实质内容的消息之后都跑一次。
+   */
+  autoOrganizeCadence: "daily" as const,
+  /**
+   * 等这么久没新消息才开跑（防抖）。连发几条时只算一轮。
+   * 0 表示不等待，排到就立刻跑。
+   */
+  autoOrganizeDebounceMs: 8_000,
+  /**
+   * 新增原文折算后少于这么多「单位」就不整理。0 表示不设门槛（默认）。
+   *
+   * 为什么默认关：`daily` 节奏下一天最多跑一次，这个门槛最多省一次调用，
+   * 但 `40` 字能说完一整件事，拦掉的往往是真内容。提示词里已有
+   * 「这次原文没有实质内容时只输出『无』」，模型自己就是更准的判断器。
+   *
+   * 什么时候该开：切到 `message`（每条消息都整理）时，寒暄会成倍烧钱，
+   * 那时门槛有意义。计数按语言折算，不是裸字符数——同样长的中英文信息量差几倍：
+   * 中日韩每字算 1，拉丁字母/数字每 2 个算 1，其余（空白、标点、emoji）不算。
+   * 于是 `40` 大致等于「40 个汉字」或「80 个英文字母」，两者的信息量接近。
+   */
+  autoOrganizeMinUnits: 0,
   maxToolCalls: 10,
   server: DEFAULT_SERVER_CONFIG,
   fs: DEFAULT_FS_CONFIG,
@@ -317,6 +351,14 @@ export const ConfigSchema = z.object({
    * 且刷新于 30 天内的摘要，单轮最多 `maxItems` 篇，失败只记日志。
    */
   autoRefreshDistill: z.boolean().default(DEFAULT_CONFIG.autoRefreshDistill),
+  /**
+   * 人物页发消息后自动跑整理（plan_people_reply §4）。默认开。
+   * 只追加简报、整篇替换当前判断；不写档案。
+   */
+  autoOrganize: z.boolean().default(DEFAULT_CONFIG.autoOrganize),
+  autoOrganizeCadence: AutoOrganizeCadenceSchema.default(DEFAULT_CONFIG.autoOrganizeCadence),
+  autoOrganizeDebounceMs: z.number().int().min(0).max(120_000).default(DEFAULT_CONFIG.autoOrganizeDebounceMs),
+  autoOrganizeMinUnits: z.number().int().min(0).max(10_000).default(DEFAULT_CONFIG.autoOrganizeMinUnits),
   maxToolCalls: z.number().int().min(1).default(DEFAULT_CONFIG.maxToolCalls),
   server: ServerConfigSchema.optional().default(DEFAULT_CONFIG.server),
   fs: FSConfigSchema.optional().default(DEFAULT_CONFIG.fs),
@@ -358,3 +400,4 @@ export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type TavilyToolConfig = z.infer<typeof TavilyToolConfigSchema>;
 export type TriliumToolConfig = z.infer<typeof TriliumToolConfigSchema>;
 export type CompactionConfig = z.infer<typeof CompactionConfigSchema>;
+export type AutoOrganizeCadence = z.infer<typeof AutoOrganizeCadenceSchema>;

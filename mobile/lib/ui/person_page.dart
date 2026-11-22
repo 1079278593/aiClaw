@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -108,6 +109,15 @@ class _PersonPageState extends State<PersonPage>
   String? _selectedText;
   String? _selectedPath;
   var _organizePending = false;
+  var _wasStreaming = false;
+  // 后台整理是否在跑（服务端 `organizing`）。跑着时简报与当前判断都是旧的。
+  var _organizing = false;
+  // 上次整理的结局，来自 `person.lastOrganize`。
+  Map<String, Object?>? _lastOrganize;
+  Timer? _organizePoll;
+  var _analysisTicket = 0;
+  String? _analysisId;
+  List<SessionSummary> _analyses = [];
 
   PersonDraft get _draft => widget.controller.draftForPerson(widget.personId);
 
@@ -124,11 +134,15 @@ class _PersonPageState extends State<PersonPage>
     _input.addListener(_rememberDraft);
     widget.controller.addListener(_onController);
     _load();
+    _loadAnalysis();
   }
 
   @override
   void dispose() {
+    _analysisTicket++;
     _closed = true;
+    _organizePoll?.cancel();
+    widget.controller.leavePersonChat();
     _pulse.dispose();
     _soundLevel.dispose();
     _inputScroll.dispose();
@@ -151,10 +165,14 @@ class _PersonPageState extends State<PersonPage>
       _organizePending = false;
       _load();
     }
+    // 阶段 2：一轮分析结束后，这一轮的用户原话已经进了 entries.jsonl。
+    if (_wasStreaming && !streaming) _load();
+    _wasStreaming = streaming;
   }
 
   Future<void> _load() async {
     try {
+      await widget.controller.loadAutoOrganize();
       final detail = await widget.controller.api.getJson(
         apiUri(widget.controller.baseUrl, '/api/people/${widget.personId}'),
         token: widget.controller.token,
@@ -172,7 +190,10 @@ class _PersonPageState extends State<PersonPage>
         if (person is Map) {
           _name = '${person['name'] ?? _name}';
           _organizedAt = person['organizedAt'] as String?;
+          final last = person['lastOrganize'];
+          _lastOrganize = last is Map ? Map<String, Object?>.from(last) : null;
         }
+        _organizing = detail['organizing'] == true;
         _profile = '${detail['profile'] ?? ''}';
         _digest = '${detail['digest'] ?? ''}';
         if (_profileEditor.text != _profile) _profileEditor.text = _profile;
@@ -180,6 +201,8 @@ class _PersonPageState extends State<PersonPage>
         _hasMore = page['hasMore'] == true;
         _error = null;
       });
+      // 后台整理才刚开始：此刻简报与当前判断都是旧的，过一会儿再拉一次。
+      if (_organizing) _scheduleOrganizePoll();
       _publish();
     } on ApiException catch (error) {
       if (!mounted) return;
@@ -214,6 +237,34 @@ class _PersonPageState extends State<PersonPage>
     final cursor = _organizedAt;
     if (cursor == null || cursor.isEmpty) return true;
     return _entries.any((entry) => entry.at.compareTo(cursor) > 0);
+  }
+
+  bool get _organizeFailed => _lastOrganize?['status'] == 'failed';
+
+  /// 后台整理是 `chatEnd` 之后才跑的，这一轮拉到的简报和当前判断仍是旧的。
+  /// 隔 1.5 秒再拉一次，服务端说跑完了就停。
+  void _scheduleOrganizePoll() {
+    _organizePoll?.cancel();
+    _organizePoll = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted || _closed) return;
+      _load();
+    });
+  }
+
+  String _organizeStatusText() {
+    if (_organizing) return '整理中…';
+    final last = _lastOrganize;
+    if (last == null) return '还没整理过';
+    final at = DateTime.tryParse('${last['at'] ?? ''}')?.toLocal();
+    final clock = at == null
+        ? ''
+        : ' ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+    final message = '${last['message'] ?? ''}';
+    return switch (last['status']) {
+      'ok' => '整理于$clock',
+      'failed' => '上次整理失败$clock${message.isEmpty ? '' : '：$message'}',
+      _ => '上次跳过$clock${message.isEmpty ? '' : '：$message'}',
+    };
   }
 
   PersonConsult _currentConsult() {
@@ -550,15 +601,148 @@ class _PersonPageState extends State<PersonPage>
     _publish();
   }
 
+  Future<void> _loadAnalysis() async {
+    final ticket = ++_analysisTicket;
+    try {
+      var list = await widget.controller.personSessions(widget.personId);
+      if (_closed || !mounted || ticket != _analysisTicket) return;
+      if (list.isEmpty) {
+        final created = await widget.controller.createPersonSession(widget.personId);
+        if (created.id.isEmpty || _closed || !mounted || ticket != _analysisTicket) return;
+        list = [created];
+      }
+      if (_closed || !mounted || ticket != _analysisTicket) return;
+      final current = list.any((session) => session.id == _analysisId) ? _analysisId! : list.first.id;
+      setState(() {
+        _analyses = list;
+        _analysisId = current;
+      });
+      widget.controller.adoptPersonSession(current);
+    } on ApiException catch (error) {
+      if (!mounted || ticket != _analysisTicket) return;
+      setState(() => _error = error.message);
+    }
+  }
+
+  Future<void> _newAnalysis() async {
+    final created = await widget.controller.createPersonSession(widget.personId);
+    if (!mounted || created.id.isEmpty) return;
+    setState(() {
+      _analyses = [created, ..._analyses.where((session) => session.id != created.id)];
+      _analysisId = created.id;
+    });
+    widget.controller.adoptPersonSession(created.id);
+  }
+
+  Future<void> _deleteAnalysis() async {
+    final id = _analysisId;
+    if (id == null || id.isEmpty) return;
+    try {
+      await widget.controller.deleteSession(id);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+    if (!mounted) return;
+    _analysisId = null;
+    await _loadAnalysis();
+  }
+
   Future<void> _ensureSession() async {
-    if (widget.controller.machine.currentSessionId != null) return;
-    final created = await widget.controller.createSession();
-    if (created.id.isNotEmpty) widget.controller.openSession(created.id);
+    if (_analysisId == null) {
+      await _loadAnalysis();
+      return;
+    }
+    widget.controller.adoptPersonSession(_analysisId!);
+  }
+
+  Widget _analysisBar() {
+    if (_analyses.isEmpty) return const SizedBox.shrink();
+    final selected = _analyses.any((session) => session.id == _analysisId) ? _analysisId : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: selected,
+                  items: [
+                    for (final session in _analyses)
+                      DropdownMenuItem(
+                        value: session.id,
+                        child: Text(session.title.isEmpty ? '分析' : session.title, overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (id) {
+                    if (id == null) return;
+                    setState(() => _analysisId = id);
+                    widget.controller.adoptPersonSession(id);
+                  },
+                ),
+              ),
+              TextButton(onPressed: _newAnalysis, child: const Text('新分析')),
+              TextButton(onPressed: _deleteAnalysis, child: const Text('删除')),
+            ],
+          ),
+          // 自动整理开关：发消息后自动追加简报、整篇替换当前判断，不改档案。
+          // 单独一行，避免窄屏上把上面的会话选择器挤成省略号。
+          Row(
+            children: [
+              const Flexible(
+                child: Text(
+                  '自动整理',
+                  style: TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                widget.controller.autoOrganize ? '开' : '关',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              Switch.adaptive(
+                value: widget.controller.autoOrganize,
+                onChanged: (value) async {
+                  await widget.controller.setAutoOrganize(value);
+                  if (!mounted) return;
+                  setState(() {});
+                },
+              ),
+              // 后台整理的结局。自动整理在回复之后才跑，光看简报有没有变分不清
+              // 「还在跑」「跳过了」和「失败了」，所以留一行字。
+              Expanded(
+                child: Text(
+                  _organizeStatusText(),
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _organizeFailed
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final body = _error != null ? Center(child: Text(_error!)) : _body();
+    final content = _error != null ? Center(child: Text(_error!)) : _body();
+    final body = Column(
+      children: [
+        _analysisBar(),
+        Expanded(child: content),
+      ],
+    );
     if (widget.embedded) {
       return Column(
         children: [
@@ -861,7 +1045,7 @@ class _PersonPageState extends State<PersonPage>
   }
 
   Widget _consultPane() {
-    final sessionId = widget.controller.machine.currentSessionId;
+    final sessionId = _analysisId ?? widget.controller.machine.currentSessionId;
     if (sessionId == null) return const Center(child: Text('还没有咨询'));
     return ChatPage(
       controller: widget.controller,

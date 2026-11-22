@@ -209,6 +209,10 @@
   "contextMaxMessages": 0,
   "injectRootIndex": false,
   "maxToolCalls": 10,
+  "autoOrganize": true,
+  "autoOrganizeCadence": "daily",
+  "autoOrganizeDebounceMs": 8000,
+  "autoOrganizeMinUnits": 0,
   "tools": {
     "tavily": {
       "enabled": true,

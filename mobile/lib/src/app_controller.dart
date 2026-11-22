@@ -185,19 +185,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _refreshSessions() async {
     final payload = await api.getJson(apiUri(baseUrl, '/api/sessions'), token: token);
-    final raw = payload['sessions'];
-    final next = <SessionSummary>[];
-    if (raw is List) {
-      for (final item in raw) {
-        if (item is! Map) continue;
-        next.add(SessionSummary(
-          id: '${item['id'] ?? ''}',
-          title: '${item['title'] ?? ''}',
-          updatedAt: '${item['updatedAt'] ?? ''}',
-        ));
-      }
-    }
-    sessions = next;
+    sessions = _readSessionList(payload['sessions']);
     notifyListeners();
   }
 
@@ -212,6 +200,104 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   /// 心得对话用的独立会话（plan_reflections_chat.md §7.4）。
   /// 它不出现在聊天列表里，join 时也不会覆盖 `lastActiveSessionId`。
   String? reflectionsSessionId;
+
+  /// 进入人物分析前的全局会话。离开人物页时切回去。
+  String? _chatBeforePerson;
+
+  /// 人物页「自动整理」开关（plan_people_reply §4）。两端共用 `app_state` 里的同一个值。
+  bool autoOrganize = true;
+
+  Future<bool> loadAutoOrganize() => _guard(_loadAutoOrganize());
+
+  Future<bool> _loadAutoOrganize() async {
+    try {
+      final payload = await api.getJson(apiUri(baseUrl, '/api/app-state'), token: token);
+      final effective = payload['autoOrganizeEffective'] ?? payload['autoOrganize'];
+      autoOrganize = effective is bool ? effective : true;
+    } on ApiException {
+      // 读不到就沿用上次的值，不挡人物页。
+    }
+    notifyListeners();
+    return autoOrganize;
+  }
+
+  Future<bool> setAutoOrganize(bool enabled) => _guard(_setAutoOrganize(enabled));
+
+  Future<bool> _setAutoOrganize(bool enabled) async {
+    final payload = await api.sendJson(
+      'PUT',
+      apiUri(baseUrl, '/api/app-state/auto-organize'),
+      token: token,
+      body: {'enabled': enabled},
+    );
+    final effective = payload['autoOrganizeEffective'];
+    autoOrganize = effective is bool ? effective : enabled;
+    notifyListeners();
+    return autoOrganize;
+  }
+
+  Future<List<SessionSummary>> personSessions(String personId) => _guard(_personSessions(personId));
+
+  Future<List<SessionSummary>> _personSessions(String personId) async {
+    final payload = await api.getJson(apiUri(baseUrl, '/api/people/$personId/sessions'), token: token);
+    return _readSessionList(payload['sessions']);
+  }
+
+  Future<SessionSummary> createPersonSession(String personId) => _guard(_createPersonSession(personId));
+
+  Future<SessionSummary> _createPersonSession(String personId) async {
+    final payload = await api.sendJson(
+      'POST',
+      apiUri(baseUrl, '/api/people/$personId/sessions'),
+      token: token,
+      body: {},
+    );
+    final session = payload['session'];
+    return SessionSummary(
+      id: session is Map ? '${session['id'] ?? ''}' : '',
+      title: session is Map ? '${session['title'] ?? ''}' : '',
+      updatedAt: session is Map ? '${session['updatedAt'] ?? ''}' : '',
+    );
+  }
+
+  List<SessionSummary> _readSessionList(Object? raw) {
+    final next = <SessionSummary>[];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is! Map) continue;
+        next.add(SessionSummary(
+          id: '${item['id'] ?? ''}',
+          title: '${item['title'] ?? ''}',
+          updatedAt: '${item['updatedAt'] ?? ''}',
+        ));
+      }
+    }
+    return next;
+  }
+
+  /// 把右侧（或咨询页）的发送切到这个人的分析会话，并记住原来的全局会话。
+  void adoptPersonSession(String sessionId) {
+    if (sessionId.isEmpty) return;
+    final current = machine.currentSessionId;
+    final currentIsGlobal = current != null && sessions.any((session) => session.id == current);
+    if (_chatBeforePerson == null && currentIsGlobal && current != sessionId) {
+      _chatBeforePerson = current;
+    }
+    if (current != sessionId) openSession(sessionId);
+  }
+
+  /// 离开人物页：回到进入前的全局会话。人物资料不动。
+  void leavePersonChat() {
+    final back = _chatBeforePerson;
+    _chatBeforePerson = null;
+    final current = machine.currentSessionId;
+    if (back != null && sessions.any((session) => session.id == back)) {
+      if (current != back) openSession(back);
+      return;
+    }
+    if (current != null && sessions.any((session) => session.id == current)) return;
+    if (sessions.isNotEmpty) openSession(sessions.first.id);
+  }
 
   /// 「待应用」角标数字，进心得首页与一轮对话结束后刷新。
   int pendingBadge = 0;
@@ -647,7 +733,12 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   Future<ContextOverview> loadContextSources() => _guard(_loadContextSources());
 
   Future<ContextOverview> _loadContextSources() async {
-    final payload = await api.getJson(apiUri(baseUrl, '/api/context/sources'), token: token);
+    // 带上当前会话：折叠状态属于这条会话自己，不带就只能看到心得那条。
+    final sessionId = machine.currentSessionId;
+    final payload = await api.getJson(
+      apiUri(baseUrl, '/api/context/sources', sessionId == null ? null : {'sessionId': sessionId}),
+      token: token,
+    );
     final overview = ContextOverview.tryParse(payload);
     if (overview == null) {
       throw ApiException(500, '上下文来源返回格式不对');

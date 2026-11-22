@@ -19,6 +19,7 @@ import path from "node:path";
 import { estimateTokens } from "../chat/context-budget.js";
 import { DIALOGUE_STATE_TOKEN_MAX, loadDialogueState } from "../chat/dialogue-state.js";
 import { loadAppState } from "../app-state/index.js";
+import { loadSession } from "../session/index.js";
 import {
   DISTILL_MAP_TOKEN_MAX,
   POLICY_TOKEN_MAX,
@@ -199,6 +200,11 @@ export async function collectContextSources(options: {
    * 不传则跳过这一块（测试与旧调用点不受影响）。
    */
   tools?: Array<{ name: string; description: string; inputSchema: unknown }>;
+  /**
+   * 当前打开的会话。传了且该会话 `fold === true` 时，把它的「当前有效」块
+   * 列成来源；不传则退回心得那条，保持旧行为。
+   */
+  sessionId?: string;
 }): Promise<ContextOverview> {
   const { userDataDir } = options;
   const paths = getPaths(userDataDir);
@@ -269,12 +275,19 @@ export async function collectContextSources(options: {
     }));
   }
 
-  // ---- 2.5 心得会话的对话状态（context_governance_plan §2.2）----
-  // 只对那一条会话生效，因此不算「每轮固定成本」；列出来是为了让用户看到
-  // 折叠之后到底往窗口里补了多大一块。
-  const reflectionsSessionId = (await loadAppState(userDataDir).catch(() => null))?.reflectionsSessionId;
-  if (reflectionsSessionId) {
-    const state = await loadDialogueState(reflectionsSessionId, userDataDir).catch(() => null);
+  // ---- 2.5 需要折叠的会话的对话状态（context_governance_plan §2.2）----
+  // 只对当前那一条会话生效，因此不算「每轮固定成本」；列出来是为了让用户看到
+  // 折叠之后到底往窗口里补了多大一块。人物分析会话与心得会话走同一条判据
+  // （`session.fold`），没有指定会话时退回心得那条，保持旧页面的显示不变。
+  const requestedSessionId = options.sessionId?.trim();
+  let foldSessionId: string | undefined;
+  if (requestedSessionId) {
+    const target = await loadSession(requestedSessionId).catch(() => null);
+    if (target?.fold) foldSessionId = target.id;
+  }
+  foldSessionId ??= (await loadAppState(userDataDir).catch(() => null))?.reflectionsSessionId;
+  if (foldSessionId) {
+    const state = await loadDialogueState(foldSessionId, userDataDir).catch(() => null);
     const current = state?.current?.trim() ?? "";
     sources.push(makeSource({
       id: "dialogueState",

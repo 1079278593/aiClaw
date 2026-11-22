@@ -381,6 +381,7 @@ export function createChatFeature({
     setSendDisabled(true);
     syncCompactButton();
     hideSpeedDisplay();
+    state.afterChatStart?.();
     state.pendingToolBlocks = {};
     state.streamingReasoningBlock = null;
     state.currentTextSegment = null;

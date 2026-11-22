@@ -11,6 +11,11 @@ export interface AppState {
   /** Mobile-only "reflections chat" session id. Never surfaces in the chat list
    *  and never overrides `lastActiveSessionId` (see plan_reflections_chat.md §7.4). */
   reflectionsSessionId?: string;
+  /**
+   * 人物页「自动整理」的开关（plan_people_reply §4）。省略时跟随
+   * `config.json` 的 `autoOrganize`；两端读写同一个值，切设备不掉。
+   */
+  autoOrganize?: boolean;
   recentModels: RecentModel[];
 }
 
@@ -46,6 +51,7 @@ export async function loadAppState(userDataDir?: string): Promise<AppState> {
     return {
       lastActiveSessionId: typeof parsed.lastActiveSessionId === "string" ? parsed.lastActiveSessionId : undefined,
       reflectionsSessionId: typeof parsed.reflectionsSessionId === "string" ? parsed.reflectionsSessionId : undefined,
+      autoOrganize: typeof parsed.autoOrganize === "boolean" ? parsed.autoOrganize : undefined,
       recentModels: normalizeRecentModels(parsed.recentModels),
     };
   } catch {
@@ -58,6 +64,7 @@ export async function saveAppState(state: AppState, userDataDir?: string): Promi
   const normalizedState: AppState = {
     lastActiveSessionId: typeof state.lastActiveSessionId === "string" ? state.lastActiveSessionId : undefined,
     reflectionsSessionId: typeof state.reflectionsSessionId === "string" ? state.reflectionsSessionId : undefined,
+    autoOrganize: typeof state.autoOrganize === "boolean" ? state.autoOrganize : undefined,
     recentModels: normalizeRecentModels(state.recentModels),
   };
   await fs.mkdir(paths.files, { recursive: true });
@@ -87,6 +94,26 @@ export async function clearReflectionsSession(userDataDir?: string): Promise<voi
   if (state.reflectionsSessionId === undefined) return;
   const { reflectionsSessionId: _drop, ...rest } = state;
   await saveAppState(rest, userDataDir);
+}
+
+/**
+ * 人物页「自动整理」开关（plan_people_reply §4）。
+ * 幂等：同一个值不重写 `app_state.json`，避免 mtime/git 噪声。
+ */
+export async function setAutoOrganize(enabled: boolean, userDataDir?: string): Promise<AppState> {
+  const state = await loadAppState(userDataDir);
+  if (state.autoOrganize === enabled) return state;
+  const next = { ...state, autoOrganize: enabled };
+  await saveAppState(next, userDataDir);
+  return next;
+}
+
+/**
+ * 实际是否自动整理：`app_state` 的用户开关优先，没设过就看配置默认值。
+ * 服务端与前端都走这一个判断，避免两边口径不同。
+ */
+export function resolveAutoOrganize(state: AppState, configDefault: boolean): boolean {
+  return state.autoOrganize ?? configDefault;
 }
 
 /** True when `sessionId` is the reflections chat session and must stay out of

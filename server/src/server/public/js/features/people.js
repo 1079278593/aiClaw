@@ -10,6 +10,10 @@ export function createPeopleFeature({ state, actions }) {
   let pane = "raw";
   let mine = false;
   let note = false;
+  let analysisSessions = [];
+  let analysisId = "";
+  /** 自动整理开关的实际取值（`app_state` 优先，否则跟配置默认值，服务端已合并）。 */
+  let autoOrganize = true;
 
   function threadPath() {
     return personId ? `people/${personId}` : "";
@@ -96,16 +100,206 @@ export function createPeopleFeature({ state, actions }) {
     if (data.person?.id) await openPerson(data.person.id);
   }
 
+  function analysisBar() {
+    if (!personId) return "";
+    const options = analysisSessions.map((session) =>
+      `<option value="${escHtml(session.id)}"${session.id === analysisId ? " selected" : ""}>${escHtml(session.title || "分析")}</option>`).join("");
+    const last = detail?.person?.lastOrganize;
+    const statusClass = last?.status === "failed" ? " people-organize-status-failed" : "";
+    return `<div class="people-sessions">
+      <select id="people-session"${options ? "" : " disabled"}>${options}</select>
+      <button type="button" id="people-session-new">新分析</button>
+      <button type="button" id="people-session-delete">删除这条分析</button>
+      <span class="people-auto-organize">
+        <label title="发消息后自动更新历史简报和当前判断；不会改档案">
+          <input type="checkbox" id="people-auto-organize"${autoOrganize ? " checked" : ""}>
+          自动整理
+        </label>
+        <span id="people-auto-organize-state" class="people-auto-organize-state">${autoOrganize ? "开" : "关"}</span>
+        <span id="people-organize-status" class="people-organize-status${statusClass}">${escHtml(organizeStatusText())}</span>
+      </span>
+    </div>`;
+  }
+
+  function bindAnalysisBar(stage) {
+    stage.querySelector("#people-session")?.addEventListener("change", (event) => {
+      const next = analysisSessions.find((session) => session.id === event.target.value);
+      if (!next) return;
+      analysisId = next.id;
+      actions.openDetachedSession?.(next);
+    });
+    stage.querySelector("#people-session-new")?.addEventListener("click", () => void createAnalysis());
+    stage.querySelector("#people-session-delete")?.addEventListener("click", () => void deleteAnalysis());
+    const auto = stage.querySelector("#people-auto-organize");
+    auto?.addEventListener("change", () => void setAutoOrganize(auto.checked));
+  }
+
+  /** 读一次开关的实际取值（配置默认值已被服务端合并成 autoOrganizeEffective）。 */
+  async function loadAutoOrganize() {
+    try {
+      const { data } = await requestJson("/api/app-state");
+      autoOrganize = data?.autoOrganizeEffective ?? data?.autoOrganize ?? true;
+    } catch {
+      autoOrganize = true;
+    }
+  }
+
+  /**
+   * 上次整理的结局。自动整理在 `chatEnd` 之后才跑，界面不能只看简报有没有变，
+   * 得有一行字说明「跑完了 / 跳过了 / 失败了」。
+   */
+  function organizeStatusText() {
+    if (detail?.organizing) return "整理中…";
+    const last = detail?.person?.lastOrganize;
+    if (!last) return "还没整理过";
+    const time = new Date(last.at);
+    const clock = Number.isNaN(time.getTime())
+      ? ""
+      : ` ${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
+    if (last.status === "ok") return `整理于${clock}`;
+    if (last.status === "failed") return `上次整理失败${clock}：${last.message || "原因不详"}`;
+    return `上次跳过${clock}${last.message ? `：${last.message}` : ""}`;
+  }
+
+  async function setAutoOrganize(enabled) {
+    const { response, data } = await requestJson(
+      "/api/app-state/auto-organize",
+      jsonRequest("PUT", { enabled }),
+    );
+    if (!response.ok) {
+      actions.showError?.(data.error || "自动整理开关没有保存");
+      await loadAutoOrganize();
+      renderStage();
+      return;
+    }
+    autoOrganize = data?.autoOrganizeEffective ?? enabled;
+    renderStage();
+  }
+
+  async function ensureAnalysis() {
+    if (!personId) return;
+    const listed = await requestJson(`/api/people/${personId}/sessions`);
+    analysisSessions = listed.data.sessions || [];
+    if (!analysisSessions.some((session) => session.id === analysisId)) {
+      if (!analysisSessions.length) {
+        const created = await requestJson(`/api/people/${personId}/sessions`, jsonRequest("POST", {}));
+        if (!created.response.ok || !created.data.session) {
+          actions.showError?.(created.data.error || "分析会话建立失败");
+          return;
+        }
+        analysisSessions = [created.data.session];
+      }
+      analysisId = analysisSessions[0].id;
+    }
+    const current = analysisSessions.find((session) => session.id === analysisId);
+    if (current && state.currentSessionId !== current.id) actions.openDetachedSession?.(current);
+  }
+
+  async function createAnalysis() {
+    if (!personId) return;
+    const { response, data } = await requestJson(`/api/people/${personId}/sessions`, jsonRequest("POST", {}));
+    if (!response.ok || !data.session) {
+      actions.showError?.(data.error || "新建分析失败");
+      return;
+    }
+    analysisId = data.session.id;
+    analysisSessions = [data.session, ...analysisSessions.filter((session) => session.id !== data.session.id)];
+    actions.openDetachedSession?.(data.session);
+    renderStage();
+  }
+
+  async function deleteAnalysis() {
+    if (!personId || !analysisId) return;
+    const { response, data } = await requestJson(`/api/sessions/${analysisId}`, { method: "DELETE" });
+    if (!response.ok) {
+      actions.showError?.(data.error || "删除失败");
+      return;
+    }
+    analysisId = "";
+    await ensureAnalysis();
+    renderStage();
+  }
+
+  /**
+   * 后台整理还在跑时，界面手里是旧数据；隔一会儿再拉一次，拉到了就停。
+   *
+   * 只更新状态那一行，不整页重绘：原文面板里有正在写的输入框，
+   * 每 1.5 秒重建一次会把用户打的字清掉。历史简报面板没有输入，可以重绘。
+   */
+  let organizePollTimer = 0;
+
+  function paintOrganizeStatus() {
+    const span = document.getElementById("people-organize-status");
+    if (!span) return;
+    const last = detail?.person?.lastOrganize;
+    span.textContent = organizeStatusText();
+    span.classList.toggle("people-organize-status-failed", last?.status === "failed");
+  }
+
+  function pollOrganize(personIdAtStart) {
+    clearTimeout(organizePollTimer);
+    organizePollTimer = window.setTimeout(async () => {
+      if (personId !== personIdAtStart || state.panel !== "people") return;
+      try {
+        const { data } = await requestJson(`/api/people/${personIdAtStart}`);
+        if (personId !== personIdAtStart || state.panel !== "people") return;
+        detail = data;
+        if (pane === "digest") {
+          renderStage();
+          syncThread();
+        } else {
+          paintOrganizeStatus();
+        }
+        if (data.organizing) pollOrganize(personIdAtStart);
+      } catch {
+        // 人可能已经切走或被删了：下一轮打开会重新拉。
+      }
+    }, 1500);
+  }
+
+  async function reloadDetail() {
+    if (!personId) return;
+    const { data } = await requestJson(`/api/people/${personId}`);
+    detail = data;
+    const page = await requestJson(`/api/people/${personId}/entries`);
+    entries = page.data.entries || [];
+    await loadAutoOrganize();
+    renderStage();
+    syncThread();
+    // `chatEnd` 一到就拉，此刻后台整理才刚开始，简报与当前判断都是旧的。
+    // 显示「整理中」，并过一会儿再拉，直到服务端说跑完了。
+    if (data.organizing) pollOrganize(personId);
+  }
+
+  /** 只刷新原文列表，不动输入框与正在写的自述。 */
+  async function reloadEntries() {
+    if (!personId) return;
+    const page = await requestJson(`/api/people/${personId}/entries`);
+    entries = page.data.entries || [];
+    const list = document.getElementById("people-entries");
+    if (list) {
+      list.innerHTML = renderEntries();
+      const stage = document.getElementById("people-stage");
+      if (stage) bindEntryActions(stage);
+    }
+    syncThread();
+  }
+
   async function openPerson(id) {
+    if (id !== personId) analysisId = "";
     personId = id;
     pane = "raw";
     const { data } = await requestJson(`/api/people/${id}`);
     detail = data;
     const page = await requestJson(`/api/people/${id}/entries`);
     entries = page.data.entries || [];
+    await loadAutoOrganize();
+    await ensureAnalysis();
     renderList();
     renderStage();
     syncThread();
+    // 切走又切回来时整理可能还在跑：和发完消息一样，先显示「整理中」再重拉。
+    if (data.organizing) pollOrganize(id);
   }
 
   function renderStage() {
@@ -127,6 +321,7 @@ export function createPeopleFeature({ state, actions }) {
           <button type="button" data-pane="digest" class="active">历史简报</button>
           <button type="button" data-pane="profile">档案</button>
         </div>
+        ${analysisBar()}
         ${pending ? `<p>还有原文没写入历史简报</p>` : ""}
         <article class="people-doc">${escHtml(detail?.digest || "还没有历史简报")}</article>`;
     } else if (pane === "profile") {
@@ -136,6 +331,7 @@ export function createPeopleFeature({ state, actions }) {
           <button type="button" data-pane="digest">历史简报</button>
           <button type="button" data-pane="profile" class="active">档案</button>
         </div>
+        ${analysisBar()}
         <textarea id="people-profile">${escHtml(detail?.profile || "")}</textarea>
         <button type="button" id="people-profile-save">保存</button>`;
       stage.querySelector("#people-profile-save")?.addEventListener("click", () => void saveProfile());
@@ -147,6 +343,7 @@ export function createPeopleFeature({ state, actions }) {
           <button type="button" data-pane="digest">历史简报</button>
           <button type="button" data-pane="profile">档案</button>
         </div>
+        ${analysisBar()}
         <div id="people-entries">${renderEntries()}</div>
         <form id="people-composer">
           <label><input id="people-mine" type="checkbox" ${mine ? "checked" : ""} ${note ? "hidden" : ""}> 自己</label>
@@ -173,6 +370,7 @@ export function createPeopleFeature({ state, actions }) {
       });
       bindEntryActions(stage);
     }
+    bindAnalysisBar(stage);
     stage.querySelectorAll("[data-pane]").forEach((button) => {
       button.addEventListener("click", () => {
         pane = button.dataset.pane;
@@ -308,10 +506,13 @@ export function createPeopleFeature({ state, actions }) {
           : !actions.canLeaveReflections || actions.canLeaveReflections();
         if (!ok) return;
       }
+      if (state.panel === "people" && next !== "people") actions.restoreChatSession?.();
       applyPanelChrome(next);
       if (next === "people") {
         state.reflectionPreview = null;
-        void loadPeople();
+        void loadPeople().then(() => {
+          if (personId) void ensureAnalysis();
+        });
       }
       remount();
       actions.reflectionsRemount?.();
@@ -341,7 +542,11 @@ export function createPeopleFeature({ state, actions }) {
     document.getElementById("panel-docs")?.addEventListener("click", () => setPanel("docs"));
     document.getElementById("panel-people")?.addEventListener("click", () => setPanel("people"));
     state.afterChat = () => {
-      if (state.panel === "people" && personId) void openPerson(personId);
+      if (state.panel === "people" && personId) void reloadDetail();
+    };
+    // 原文在 chatStart 之前就已落盘，气泡一出来就能在原文列表看到。
+    state.afterChatStart = () => {
+      if (state.panel === "people" && personId) void reloadEntries();
     };
   }
 

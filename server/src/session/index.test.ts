@@ -14,6 +14,7 @@ import {
   deleteSession,
   addMessage,
   listSessions,
+  listPersonSessions,
   getInitialSession,
   renameSession,
 } from "./index.js";
@@ -128,5 +129,36 @@ describe("session", () => {
     const initial = await getInitialSession(testDir);
     expect(initial.title).toBe("New Chat");
     expect(initial.messages).toEqual([]);
+  });
+
+  it("persists personId and does not pick that session as the default chat", async () => {
+    const chat = await createSession("Chat", testDir);
+    const analysis = await createSession(undefined, testDir, "personA");
+    expect(analysis.title).toBe("分析");
+    expect(analysis.personId).toBe("personA");
+
+    await addMessage(analysis.id, {
+      id: "m1",
+      role: "user",
+      content: "怎么回",
+      timestamp: new Date().toISOString(),
+    }, testDir);
+    const loaded = await loadSession(analysis.id, testDir);
+    expect(loaded.personId).toBe("personA");
+    expect(loaded.messages).toHaveLength(1);
+
+    const scoped = await listPersonSessions("personA", testDir);
+    expect(scoped.map((session) => session.id)).toEqual([analysis.id]);
+    expect((await getInitialSession(testDir)).id).toBe(chat.id);
+
+    await deleteSession(analysis.id, testDir);
+    expect(await listPersonSessions("personA", testDir)).toEqual([]);
+  });
+
+  it("creates a normal chat when the only existing session belongs to a person", async () => {
+    await createSession(undefined, testDir, "personB");
+    const initial = await getInitialSession(testDir);
+    expect(initial.personId).toBeUndefined();
+    expect(initial.title).toBe("New Chat");
   });
 });

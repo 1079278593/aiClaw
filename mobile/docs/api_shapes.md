@@ -173,7 +173,23 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 
 `GET /api/people?sort=recent` 按 `updatedAt` 从新到旧。`sort=name` 按称呼排序。返回 `{ people: [ person ] }`。`preview` 是原文最后一条文字，最多 80 字；没有原文时为「空」。
 
-`GET /api/people/:id` 返回 `{ person, profile, digest }`。`digest` 是历史简报全文。
+`GET /api/people/:id` 返回 `{ person, profile, digest, current, organizing }`。`digest` 是历史简报全文；`current` 是当前判断全文（`current.md`，只有版本头时表示还没写出过）。人物页发消息后自动整理会把简报追加一段、把 `current` 整篇换掉，档案（`profile`）不动。
+
+`organizing` 是布尔值：为 `true` 表示后台自动整理此刻正在跑。这时 `digest` 与 `current` 都是**上一次**的版本，客户端应当显示「整理中」而不是「没变就是坏了」，隔一会儿再拉一次。
+
+`person.lastOrganize` 是最近一次整理的结局，自动与手动共用这一个字段：
+
+```json
+"lastOrganize": { "at": "2026-05-01T02:03:00.000Z", "status": "failed", "message": "整理用的模型没有配置" }
+```
+
+`status` 取 `ok` / `skipped` / `failed`。`at` 是完成这件事的时钟，不是 `organizedAt`——今天没有新原文时游标不动，但仍要记下「跑过一趟」。`message` 只在 `skipped`、`failed` 时出现。没有整理过就省略整个字段。
+
+自动整理按「每人每天一轮」（`config.json` 的 `autoOrganizeCadence`，默认 `daily`）。当天已经跑过时，`GET /api/people/:id` 仍然是上一次的结果，不会再变；客户端不需要为此显示异常。同一天新的原文照常进 `entries`，留到次日那一轮一起整理。`person.organizeWindow.day` 是「今天是否已跑过」的北京日期，仅供排查，界面不必用。
+
+一条也许要写进文档的例外：手动整理（`POST` 触发的那次 `organize`）**不受任何自动整理节流影响**。它只要求「有新增原文」，没有字数门槛、不受「今天是否跑过」限制，哪怕只有一句「在吗」也会照做。
+
+`PUT /api/app-state/auto-organize` 的 body 是 `{ enabled: boolean }`，返回 `{ autoOrganize, autoOrganizeEffective, ... }`。这是人物页「自动整理」开关，桌面与移动端共用；`GET /api/app-state` 也带 `autoOrganizeEffective`，它是「用户开关优先、否则跟随 `config.json` 的 `autoOrganize`」合并后的实际值，客户端显示这一个即可。非布尔值 400。
 
 `GET /api/people/:id/entries?before=&limit=` 按时间轴返回一页原文。`limit` 默认 50。省略 `before` 时返回最新一页。结果 `{ entries, hasMore }`，从早到晚。条目没有 `images`。
 
@@ -194,6 +210,16 @@ PUT 里密钥字段省略表示不修改，空字符串表示清除。`trilium.t
 识别 `POST /api/people/:id/recognize`，`multipart/form-data`：`images` 可重复，另有 `provider`、`model`。不写 `chatMessage`。当前模型不是视觉模型时 400，`error` 为「请切换到视觉模型后再识别」，不产生条目。群聊或左侧有两个及以上的人时，这一张失败，`error` 为「这是群聊，不能放进个人对话」。其它失败为「识别失败」。成功的句子只含双方说过的话，按从上到下排列，`speaker` 为 `me` 或 `them`。时间、系统灰字和撤回不产生条目。服务端不保存图片字节。
 
 整理由咨询输入框的「整理」按钮发起，走一轮 `chatMessage`，`captureJob` 为 `organize`，用户可见内容为「整理目前新增的内容。」材料由服务端附在给模型的说明里，不另开隐藏任务。成功后服务端把回复里 `<<<档案>>>` 之前的正文追加进 `digest.md`，并把 `organizedAt` 写成这次最后一条原文的 `at`。该标记之后栏目齐全时写成 `profile.md`。标记之后的文字不进入气泡，也不进入会话记录。失败时两个文件都不改，`organizedAt` 也不动。
+
+自动整理：普通咨询发消息（不带 `captureJob`）成功后，服务端在 `chatEnd` 推送之后自己再调一次模型（`config.compaction` 那套），不需要客户端参与，也不阻塞这一轮的回复。它只追加 `digest.md` 一段、整篇替换 `current.md`；`profile.md` 不动，回复里就算带了 `<<<档案>>>` 也丢弃。`current.md` 超过 1500 字这次不替换（简报照常追加）。原文没有实质内容、或模型回「无」时，两个文件与 `organizedAt` 都不动。手动整理在跑时这一轮自动整理让路。开关见 `PUT /api/app-state/auto-organize`。
+
+自动整理的并发与失败处理：
+
+- 串行单位是 `personId`。同一人已经有一份在跑时，新请求不排队，只记一个「跑完再补一轮」——连续发十条最多多跑一轮。
+- 人点「整理」时，正在跑的自动整理**被取消**（`AbortController`），已经写进去的那一段保留、不回滚。补跑也不做：手动整理会把游标推到最新，补跑没内容。
+- 单次整理有 60 秒总时长上限，到点 abort 并记 `lastOrganize.status = "failed"`，`message` 为「整理超时，没有写入」。失败不再只是日志——只进日志的话，界面上和「还没整理过」长得一样。
+- `organizedAt` **只前进**。整理跑得久，期间别处可能已经把它推到更远的位置；写回时取两者较晚的那个，否则下一次会把已经整理过的原文再整理一遍。
+- `digest.md` 的写入按 `personId` 串行。它是「整篇读出→拼接→写回」，自动与手动两条路径同时进来必然丢一段。
 
 `PATCH /api/people/:id/entries/:entryId` 的 body 是 `{ text?, speaker? }`。`at` 和顺序不变。`speaker` 只对 `line` 有效。不改 `digest.md`，也不改 `organizedAt`。
 

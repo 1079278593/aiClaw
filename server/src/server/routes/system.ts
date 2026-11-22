@@ -1,7 +1,8 @@
 import { readAccountSettings, updateAccountSettings } from "../../config/account-settings.js";
 import { rotateUser } from "../../tenant/users.js";
 import { getAvailableProviders, type Config, type ProviderName } from "../../config/index.js";
-import { loadAppState, setReflectionsSession } from "../../app-state/index.js";
+import { loadAppState, resolveAutoOrganize, setAutoOrganize, setReflectionsSession } from "../../app-state/index.js";
+import { setSessionFold } from "../../session/index.js";
 import { authIsRequired } from "../../tenant/access.js";
 import { currentTenant } from "../../tenant/store.js";
 import { flushUsage, getDailyStats, getUsageStats } from "../services/usage-store.js";
@@ -70,7 +71,25 @@ export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, 
     return true;
   }
   if (url.pathname === "/api/app-state" && req.method === "GET") {
-    sendJson(res, await loadAppState());
+    // 把「实际是否自动整理」一并算好：前端不必自己合并配置默认值与用户开关。
+    const state = await loadAppState();
+    sendJson(res, { ...state, autoOrganizeEffective: resolveAutoOrganize(state, config.autoOrganize) });
+    return true;
+  }
+  // 人物页「自动整理」开关（plan_people_reply §4）。桌面与移动端共用这一个值。
+  if (url.pathname === "/api/app-state/auto-organize" && req.method === "PUT") {
+    try {
+      const body = await readJsonBody<{ enabled?: unknown }>(req);
+      if (typeof body.enabled !== "boolean") {
+        sendJson(res, { error: "enabled 必须是 true 或 false" }, 400);
+        return true;
+      }
+      const state = await setAutoOrganize(body.enabled);
+      sendJson(res, { ...state, autoOrganizeEffective: resolveAutoOrganize(state, config.autoOrganize) });
+    } catch (error) {
+      const message = error instanceof SyntaxError ? "请求不是 JSON" : (error as Error).message;
+      sendJson(res, { error: message }, 400);
+    }
     return true;
   }
   // Mobile "reflections chat" session binding (plan_reflections_chat.md §7.4).
@@ -84,6 +103,10 @@ export const handleSystemRoutes: RouteHandler = async ({ req, res, url, config, 
         return true;
       }
       await setReflectionsSession(sessionId);
+      // 心得会话也走同一条折叠判据（`fold`），不再靠 app_state 里的单例指针旁路判断。
+      await setSessionFold(sessionId, true).catch((error) => {
+        logger.warn(`reflections session fold not set: ${(error as Error).message}`, { sessionId });
+      });
       sendJson(res, await loadAppState());
     } catch (error) {
       const message = error instanceof SyntaxError ? "请求不是 JSON" : (error as Error).message;

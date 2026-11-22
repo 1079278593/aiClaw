@@ -35,8 +35,15 @@ function createMetadataMessage(session: Session): Message {
       lastProvider: session.lastProvider,
       lastModel: session.lastModel,
       lastThinkingEffort: session.lastThinkingEffort,
+      ...(session.personId ? { personId: session.personId } : {}),
+      ...(session.fold ? { fold: true } : {}),
     },
   };
+}
+
+export async function listPersonSessions(personId: string, userDataDir?: string): Promise<Session[]> {
+  const sessions = await listSessions(userDataDir);
+  return sessions.filter((session) => session.personId === personId);
 }
 
 export async function listSessions(userDataDir?: string): Promise<Session[]> {
@@ -72,6 +79,8 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
     lastProvider?: string;
     lastModel?: string;
     lastThinkingEffort?: string;
+    personId?: string;
+    fold?: boolean;
   } | null = null;
 
   for (const line of lines) {
@@ -85,6 +94,8 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
           lastProvider: msg.metadata?.lastProvider as string | undefined,
           lastModel: msg.metadata?.lastModel as string | undefined,
           lastThinkingEffort: msg.metadata?.lastThinkingEffort as string | undefined,
+          personId: typeof msg.metadata?.personId === "string" && msg.metadata.personId ? msg.metadata.personId : undefined,
+          fold: msg.metadata?.fold === true ? true : undefined,
         };
       } else {
         messages.push(msg);
@@ -105,6 +116,8 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
     lastProvider: sessionMeta?.lastProvider,
     lastModel: sessionMeta?.lastModel,
     lastThinkingEffort: sessionMeta?.lastThinkingEffort,
+    personId: sessionMeta?.personId,
+    fold: sessionMeta?.fold,
   };
 }
 
@@ -135,8 +148,9 @@ async function getAutoSessionTitle(userDataDir?: string, baseTitle: string = DEF
   return `${baseTitle} ${index}`;
 }
 
-export async function createSession(title?: string, userDataDir?: string): Promise<Session> {
-  const finalTitle = normalizeSessionTitle(title) || await getAutoSessionTitle(userDataDir);
+export async function createSession(title?: string, userDataDir?: string, personId?: string): Promise<Session> {
+  if (personId !== undefined && !/^[A-Za-z0-9]+$/.test(personId)) throw new Error("Invalid person");
+  const finalTitle = normalizeSessionTitle(title) || await getAutoSessionTitle(userDataDir, personId ? "分析" : DEFAULT_SESSION_TITLE);
   const now = new Date().toISOString();
   const session: Session = {
     id: generateId(),
@@ -144,9 +158,29 @@ export async function createSession(title?: string, userDataDir?: string): Promi
     createdAt: now,
     updatedAt: now,
     messages: [],
+    personId,
+    // 人物分析会话必须折叠：多轮判断不能只靠预算从头部静默丢轮次
+    // （plan_people_reply §5）。判据统一落在 `fold`，不靠调用方再传一次。
+    ...(personId ? { fold: true } : {}),
   };
   await saveSession(session, userDataDir);
   logger.info(`Created session ${session.id}: ${finalTitle}`);
+  return session;
+}
+
+/**
+ * 打开/关闭某个会话的增量折叠。
+ *
+ * 心得会话是移动端懒建的，建的时候不带 `personId`，绑定之后才补这一笔；
+ * 人物会话在 `createSession` 时已经写好，不需要再调。
+ */
+export async function setSessionFold(sessionId: string, fold: boolean, userDataDir?: string): Promise<Session> {
+  const session = await loadSession(sessionId, userDataDir);
+  const next = fold ? true : undefined;
+  if (session.fold === next) return session;
+  session.fold = next;
+  session.updatedAt = new Date().toISOString();
+  await saveSession(session, userDataDir);
   return session;
 }
 
@@ -205,7 +239,7 @@ export async function truncateSession(
 }
 
 export async function getInitialSession(userDataDir?: string): Promise<Session> {
-  const sessions = await listSessions(userDataDir);
+  const sessions = (await listSessions(userDataDir)).filter((session) => !session.personId);
   const appState = await loadAppState(userDataDir);
 
   if (appState.lastActiveSessionId) {

@@ -43,6 +43,7 @@ export function createAppState() {
     personThread: null,
     reflectionPreview: null,
     afterChat: null,
+    afterChatStart: null,
     userScrolledUp: false,
     sessionLoadRequestId: null,
     visibleProcessStep: null,

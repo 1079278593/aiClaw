@@ -368,6 +368,7 @@ class _ShellPageState extends State<ShellPage> {
       builder: (context, _) {
         final id = widget.controller.machine.currentSessionId;
         if (id == null) {
+          if (consult != null) return const Center(child: Text('正在打开分析'));
           return Center(
             child: FilledButton(
               onPressed: () async {

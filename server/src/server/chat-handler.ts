@@ -13,7 +13,9 @@ import { normalizeImageDataUrl } from "../media/image.js";
 import { appendUsageRecord } from "./services/usage-store.js";
 import { buildPersonContextSuffix, personIdFromThreadPath } from "../people/context.js";
 import { ORGANIZE_USER_TEXT, applyOrganizeResult, buildOrganizeMaterials, splitOrganizeReply, visibleBeforeMarker } from "../people/organize.js";
-import { entriesAfter, getPersonRecord, readEntries } from "../people/store.js";
+import { markManualOrganize, scheduleAutoOrganize } from "../people/auto-organize.js";
+import { recordPersonInput } from "../people/input.js";
+import { entriesAfter, getPersonRecord, readEntries, recordOrganizeOutcome } from "../people/store.js";
 import { replaceLastAssistantContent } from "../session/index.js";
 import { classifyToolRisk, needsConfirmation, sessionGrantKey } from "../tools/risk.js";
 
@@ -96,6 +98,8 @@ export async function processChatMessage(options: {
   const sendChatEvent = <T extends { type: string }>(event: T): void => {
     sendToClient(client, { ...event, sessionId, runId, sequence: ++sequence } as Parameters<typeof sendToClient>[1]);
   };
+  /** 手动整理期间登记的人。`finally` 里要用，所以提到 try 外。 */
+  let manualOrganizePerson: string | undefined;
 
   try {
     if (images?.length && getModelModal(config, provider, model) !== "vl") {
@@ -125,6 +129,11 @@ export async function processChatMessage(options: {
       sendToClient(client, { type: "error", sessionId, message: "没有选中的人" });
       return;
     }
+    // 手动整理期间自动整理让路（手动是人的明确意图，优先级更高）。
+    if (organizing && personId) {
+      markManualOrganize(personId, true);
+      manualOrganizePerson = personId;
+    }
     if (personId) {
       let record: Awaited<ReturnType<typeof getPersonRecord>>;
       try {
@@ -142,10 +151,25 @@ export async function processChatMessage(options: {
         organizeLastAt = fresh.at(-1)?.at;
         visibleContent = ORGANIZE_USER_TEXT;
         contextSuffix = buildOrganizeMaterials(record.digest, record.profile, fresh);
-      } else {
+      } else {        // 阶段 2：用户原话先落 entries.jsonl，再开始这一轮分析。
+        // 会话写失败、生成失败都不影响这条原文。
+        if (content.trim()) {
+          try {
+            const saved = await recordPersonInput(personId, content);
+            visibleContent = saved.visibleContent;
+          } catch (error) {
+            sendToClient(client, {
+              type: "error",
+              sessionId,
+              message: `原文没有写入，这一轮没有开始：${(error as Error).message}`,
+            });
+            return;
+          }
+        }
         contextSuffix = buildPersonContextSuffix({
           id: personId,
           profile: record.profile,
+          current: record.current,
           previewPath,
           selectedPreviewText,
         });
@@ -159,7 +183,9 @@ export async function processChatMessage(options: {
       organizing ? undefined : normalizedImages,
       organizing ? undefined : previewPath,
       organizing ? undefined : selectedPreviewText,
-      contextSuffix ? { contextSuffix, persistPlain: true } : undefined,
+      contextSuffix
+        ? { contextSuffix, persistPlain: true, persistContent: personId && !organizing ? content : undefined }
+        : undefined,
     );
     let fullResponse = "";
     let rawResponse = "";
@@ -247,6 +273,11 @@ export async function processChatMessage(options: {
       try {
         await applyOrganizeResult(personId!, rawResponse, organizeLastAt);
       } catch (error) {
+        // 手动整理失败也要留痕：否则界面上和「还没整理过」一样。
+        await recordOrganizeOutcome(
+          personId!,
+          { at: new Date().toISOString(), status: "failed", message: (error as Error).message.slice(0, 200) || "整理失败" },
+        ).catch(() => undefined);
         sendToClient(client, { type: "error", sessionId, runId, sequence: ++sequence, message: (error as Error).message });
         return;
       }
@@ -273,10 +304,17 @@ export async function processChatMessage(options: {
       ...(budget ? { budget } : {}),
     });
     logger.info(`Chat completed: ${(await loadSession(sessionId)).title}`);
+
+    // 阶段 4：这一轮回复已经推送完，才让后台整理跑起来。
+    // 不 await —— 自动整理会再调一次模型，绝不能让用户等它。
+    if (personId && !organizing && content.trim()) {
+      void scheduleAutoOrganize(personId, config, logger);
+    }
   } catch (error) {
     logger.error(`Chat processing error: ${(error as Error).message}`);
     sendToClient(client, { type: "error", sessionId, runId, sequence: ++sequence, message: `Chat failed: ${(error as Error).message}` });
   } finally {
     if (activeChats.get(sessionId)?.runId === runId) activeChats.delete(sessionId);
+    if (manualOrganizePerson) markManualOrganize(manualOrganizePerson, false);
   }
 }

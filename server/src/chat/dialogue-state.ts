@@ -218,6 +218,42 @@ export async function saveDialogueState(
 }
 
 /**
+ * 删掉某个会话的状态块，其它会话不动。
+ *
+ * 与「删会话不删文件」的关系：心得会话删了要保留状态（那是人的长期结论），
+ * 人物分析会话删了要连块一起删（那条状态只属于这一次分析，留着会与新会话
+ * 的判断混在一起）。调用方按 `session.fold` + 身份决定是否调用这里。
+ */
+export async function removeDialogueState(sessionId: string, userDataDir?: string): Promise<boolean> {
+  const file = stateFile(userDataDir);
+  return withLock(file, async () => {
+    const states = parseDialogueStates(await readText(file));
+    if (!states.delete(sessionId)) return false;
+    await writeAtomic(file, renderDialogueStates(states));
+    return true;
+  });
+}
+
+/**
+ * 只把游标丢掉，保留「当前有效」。
+ *
+ * 用于会话被截断、游标指向的消息已经不存在的情况：结论仍然有效，
+ * 但不能让游标悬空——否则 `pendingRange` 会一直返回 null，这条会话
+ * 再也不会折叠，而窗口又会退回发送全部原文。
+ */
+export async function resetDialogueCursor(sessionId: string, userDataDir?: string): Promise<boolean> {
+  const file = stateFile(userDataDir);
+  return withLock(file, async () => {
+    const states = parseDialogueStates(await readText(file));
+    const state = states.get(sessionId);
+    if (!state || !state.foldedThrough) return false;
+    states.set(sessionId, { current: state.current, history: state.history, updatedAt: new Date().toISOString() });
+    await writeAtomic(file, renderDialogueStates(states));
+    return true;
+  });
+}
+
+/**
  * 注入用的「当前有效」一块。
  *
  * 超过 `DIALOGUE_STATE_TOKEN_MAX` 时整块不注入并返回原因——半块状态比没有更误导。

@@ -139,11 +139,16 @@ function render(overview) {
   window.lucide?.createIcons();
 }
 
+/** 当前会话 id：折叠状态属于会话自己，读报表时要带上（`initContextSources` 注入）。 */
+let currentSessionId = null;
+
 async function load() {
   const status = document.getElementById("context-status");
   const list = document.getElementById("context-list");
   if (status) status.textContent = "正在读取…";
-  const { response, data } = await requestJson("/api/context/sources");
+  // 带上当前会话：折叠状态属于这条会话自己，不带就只能看到心得那条。
+  const query = currentSessionId ? `?sessionId=${encodeURIComponent(currentSessionId)}` : "";
+  const { response, data } = await requestJson(`/api/context/sources${query}`);
   if (!response.ok) {
     if (status) status.textContent = data?.error || "读取失败";
     if (list) list.innerHTML = "";
@@ -154,13 +159,15 @@ async function load() {
   render(data);
 }
 
-export function initContextSources() {
+export function initContextSources({ state } = {}) {
   const modal = document.getElementById("context-modal");
   if (!modal) return;
 
+  // 打开面板时读一次当前会话 id，之后的读取都用它。
   const open = async () => {
     document.getElementById("settings-dropdown")?.classList.remove("open");
     modal.classList.add("open");
+    currentSessionId = state?.currentSessionId ?? null;
     await load();
   };
   const close = () => {

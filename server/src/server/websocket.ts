@@ -127,7 +127,7 @@ export function handleWebSocketConnection(
           // The mobile reflections chat owns its own session id; joining it must
           // NOT move the "resume where you left off" pointer (plan §7.4 step 3).
           const appState = await loadAppState();
-          if (!isReflectionsSession(appState, message.sessionId)) {
+          if (!session.personId && !isReflectionsSession(appState, message.sessionId)) {
             await setLastActiveSession(message.sessionId);
           }
           sendToClient(client, {

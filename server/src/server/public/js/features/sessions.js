@@ -40,6 +40,7 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     state.sessions = data.sessions || [];
     renderSessionList();
     if (!state.sessions.length) {
+      if (state.panel === "people" && state.currentSessionId) return;
       state.currentSessionId = null;
       state.latestUsage = null;
       state.currentSessionMessageCount = 0;
@@ -218,8 +219,8 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     return true;
   }
 
-  function selectSession(id) {
-    const target = state.sessions.find((session) => session.id === id);
+  function selectSession(id, detached) {
+    const target = state.sessions.find((session) => session.id === id) || detached || null;
     permissions.hideActive();
     saveSessionState(state.currentSessionId);
     state.currentSessionId = id;
@@ -233,6 +234,10 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
       resetRuntimeState(target);
       renderSessionList();
       actions.renderChatArea();
+      if (target?.title) {
+        const titleEl = document.getElementById("chat-title");
+        if (titleEl) titleEl.textContent = target.title;
+      }
       // Trigger session-enter animation on the newly created messages container
       if (state.messagesEl) {
         state.messagesEl.classList.add("session-enter");
@@ -263,6 +268,26 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     actions.setSendDisabled(restored ? state.isStreaming : false);
     permissions.showForSession(id);
     joinSession(id);
+  }
+
+  function openDetachedSession(session) {
+    if (!session?.id) return;
+    const currentInList = state.sessions.some((item) => item.id === state.currentSessionId);
+    if (!state.chatBeforePerson && currentInList && state.currentSessionId !== session.id) {
+      state.chatBeforePerson = state.currentSessionId;
+    }
+    selectSession(session.id, session);
+  }
+
+  function restoreChatSession() {
+    const id = state.chatBeforePerson;
+    state.chatBeforePerson = null;
+    const fallback = state.sessions.find((session) => session.id === id) || state.sessions[0];
+    if (fallback) {
+      selectSession(fallback.id);
+      return;
+    }
+    void createSession();
   }
 
   function resetRuntimeState(session) {
@@ -357,5 +382,7 @@ export function createSessionFeature({ state, socket, renderer, pickers, permiss
     renameSessionById,
     renderSessionList,
     selectSession,
+    openDetachedSession,
+    restoreChatSession,
   };
 }

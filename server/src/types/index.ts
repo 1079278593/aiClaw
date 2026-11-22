@@ -44,6 +44,16 @@ export interface Session {
   lastProvider?: string;
   lastModel?: string;
   lastThinkingEffort?: string;
+  /** 人物分析会话。有值时不进全局聊天列表，join 也不写 lastActiveSessionId。 */
+  personId?: string;
+  /**
+   * 是否对本会话做增量折叠（`chat/dialogue-fold.ts`）。
+   *
+   * 判据只看这个字段，不看会话「是谁」：人物分析会话与心得会话都写 `true`，
+   * 普通聊天不写。人物页的多轮判断不能靠 `context-budget.ts` 静默丢轮次，
+   * 否则模型会忘掉这个情境里已经做过的取舍（plan_people_reply §5）。
+   */
+  fold?: boolean;
 }
 
 // Config types - re-export from config module

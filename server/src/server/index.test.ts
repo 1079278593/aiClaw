@@ -57,6 +57,10 @@ const mockConfig: Config = {
   injectRootIndex: false,
       injectDistillMap: false,
       autoRefreshDistill: false,
+      autoOrganize: false,
+      autoOrganizeCadence: "message",
+      autoOrganizeDebounceMs: 0,
+      autoOrganizeMinUnits: 0,
   maxToolCalls: 10,
   server: { port: 3000, host: "127.0.0.1", accessToken: "", corsOrigins: [] },
   fs: { policy: { readable: ["inputs", "knowledge_base", "files"], writable: ["inputs", "knowledge_base", "files"], denied: [] }, allowedFiles: ["memory.md"] },
@@ -291,9 +295,55 @@ describe("server", () => {
   it("returns app state endpoint", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/app-state`);
     expect(res.status).toBe(200);
-    const data = await res.json() as { lastActiveSessionId?: string; recentModels?: Array<{ provider: string; model: string }> };
+    const data = await res.json() as { lastActiveSessionId?: string; recentModels?: Array<{ provider: string; model: string }>; autoOrganizeEffective?: boolean };
     expect(typeof data).toBe("object");
     expect(data.recentModels).toEqual([]);
+    // 没设过用户开关时跟随配置；测试配置把 autoOrganize 关了。
+    expect(data.autoOrganizeEffective).toBe(false);
+  });
+
+  it("persists the auto organize switch across both clients", async () => {
+    const put = await fetch(`http://127.0.0.1:${port}/api/app-state/auto-organize`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(put.status).toBe(200);
+    const saved = await put.json() as { autoOrganize?: boolean; autoOrganizeEffective?: boolean };
+    expect(saved.autoOrganize).toBe(true);
+    // 配置里默认关，但用户显式打开后以用户的选择为准。
+    expect(saved.autoOrganizeEffective).toBe(true);
+
+    const after = await (await fetch(`http://127.0.0.1:${port}/api/app-state`)).json() as {
+      autoOrganize?: boolean;
+      autoOrganizeEffective?: boolean;
+    };
+    expect(after.autoOrganize).toBe(true);
+    expect(after.autoOrganizeEffective).toBe(true);
+
+    // 非布尔值一律拒绝，不把字符串当开关。
+    const bad = await fetch(`http://127.0.0.1:${port}/api/app-state/auto-organize`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: "yes" }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("creates current.md for a new person and returns it inline", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "乙" }),
+    });
+    const person = (await res.json() as { person: { id: string } }).person;
+    const detail = await (await fetch(`http://127.0.0.1:${port}/api/people/${person.id}`)).json() as {
+      current?: string;
+      organizing?: boolean;
+    };
+    expect(detail.current).toContain("schemaVersion: 1");
+    // 界面靠这个区分「还在跑」与「跑完了但什么都没写」。
+    expect(detail.organizing).toBe(false);
   });
 
   it("returns knowledge overview", async () => {
@@ -621,6 +671,69 @@ describe("server", () => {
     };
     expect(list.sessions.some((session) => session.id === reflections.id)).toBe(false);
     expect(list.sessions.some((session) => session.id === chat.id)).toBe(true);
+  });
+
+  it("keeps a person analysis session out of the chat list and lastActiveSessionId", async () => {
+    const chatRes = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Chat" }),
+    });
+    const chat = (await chatRes.json() as { session: { id: string } }).session;
+    const { ws, recv } = await connectWs(port);
+    await recv();
+    ws.send(JSON.stringify({ type: "joinSession", sessionId: chat.id, requestId: "chat-join" }));
+    await recv();
+    ws.close();
+
+    const personRes = await fetch(`http://127.0.0.1:${port}/api/people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "甲" }),
+    });
+    expect(personRes.status).toBe(200);
+    const person = (await personRes.json() as { person: { id: string } }).person;
+    const before = await (await fetch(`http://127.0.0.1:${port}/api/people/${person.id}`)).json() as {
+      profile: string;
+      digest: string;
+    };
+
+    const analysisRes = await fetch(`http://127.0.0.1:${port}/api/people/${person.id}/sessions`, { method: "POST" });
+    expect(analysisRes.status).toBe(201);
+    const analysis = (await analysisRes.json() as { session: { id: string; personId?: string; title: string } }).session;
+    expect(analysis.personId).toBe(person.id);
+    expect(analysis.title).toBe("分析");
+
+    const list = await (await fetch(`http://127.0.0.1:${port}/api/sessions`)).json() as {
+      sessions: Array<{ id: string }>;
+    };
+    expect(list.sessions.some((session) => session.id === analysis.id)).toBe(false);
+    expect(list.sessions.some((session) => session.id === chat.id)).toBe(true);
+
+    const scoped = await (await fetch(`http://127.0.0.1:${port}/api/people/${person.id}/sessions`)).json() as {
+      sessions: Array<{ id: string }>;
+    };
+    expect(scoped.sessions.map((session) => session.id)).toContain(analysis.id);
+
+    const ws2 = await connectWs(port);
+    await ws2.recv();
+    ws2.ws.send(JSON.stringify({ type: "joinSession", sessionId: analysis.id, requestId: "person-join" }));
+    const loaded = await ws2.recv() as { type: string; session: { id: string } };
+    expect(loaded.type).toBe("sessionLoaded");
+    expect(loaded.session.id).toBe(analysis.id);
+    ws2.ws.close();
+
+    const appState = await (await fetch(`http://127.0.0.1:${port}/api/app-state`)).json() as { lastActiveSessionId?: string };
+    expect(appState.lastActiveSessionId).toBe(chat.id);
+
+    const deleted = await fetch(`http://127.0.0.1:${port}/api/sessions/${analysis.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    const after = await (await fetch(`http://127.0.0.1:${port}/api/people/${person.id}`)).json() as {
+      profile: string;
+      digest: string;
+    };
+    expect(after.profile).toBe(before.profile);
+    expect(after.digest).toBe(before.digest);
   });
 
   it("exposes authRequired on public health", async () => {    const res = await fetch(`http://127.0.0.1:${port}/health`);

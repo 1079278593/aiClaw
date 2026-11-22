@@ -41,6 +41,24 @@ schemaVersion: 1
 ---
 `;
 
+/**
+ * 当前判断的上限（plan_people_reply §4）：整篇替换，不是追加。
+ * 超限时这次**不替换**——宁可保留旧的短判断，也不写进一份长文。
+ */
+export const CURRENT_CHAR_LIMIT = 1500;
+
+/** 当前判断的初始文件：只有版本头，与 `digest.md` 同构。 */
+export const EMPTY_CURRENT = `---
+schemaVersion: 1
+---
+`;
+
+/** 去掉版本头后的正文。上限按正文算，不把 frontmatter 计入 1500 字。 */
+export function currentBody(markdown: string): string {
+  const stripped = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  return stripped.trim();
+}
+
 export function profileHeadingsComplete(markdown: string): boolean {
   if (!PROFILE_HEADINGS.every((heading) => markdown.includes(heading))) return false;
   return BASIC_ITEMS.every((item) => new RegExp(`^- ${item}：`, "m").test(markdown));
