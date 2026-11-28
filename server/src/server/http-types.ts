@@ -38,6 +38,8 @@ export function toSessionMessage(session: Session): Extract<ServerMessage, { typ
       lastProvider: session.lastProvider,
       lastModel: session.lastModel,
       lastThinkingEffort: session.lastThinkingEffort,
+      // 下发白名单也要带上：否则服务端存了、界面上看不到（plan_experts §4）。
+      ...(session.experts?.length ? { experts: session.experts } : {}),
     },
   };
 }

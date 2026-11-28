@@ -1706,6 +1706,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
    no full-screen hit-testing layer can block underlying UI. */
 #usage-modal,
 #knowledge-modal,
+#experts-modal,
 #git-sync-modal,
 #help-modal,
 #compact-modal {
@@ -1720,6 +1721,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
 }
 #usage-modal.open,
 #knowledge-modal.open,
+#experts-modal.open,
 #git-sync-modal.open,
 #help-modal.open,
 #compact-modal.open {
@@ -1735,6 +1737,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
   transition-delay: 0s;
 }
 #knowledge-modal.open,
+#experts-modal.open,
 #git-sync-modal.open,
 #help-modal.open {
   align-items: center;
@@ -1743,6 +1746,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
 }
 #usage-panel,
 #knowledge-panel,
+#experts-panel,
 #git-sync-panel,
 #help-panel,
 #compact-panel {
@@ -1754,6 +1758,7 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
 }
 #usage-modal.open #usage-panel,
 #knowledge-modal.open #knowledge-panel,
+#experts-modal.open #experts-panel,
 #git-sync-modal.open #git-sync-panel,
 #help-modal.open #help-panel,
 #compact-modal.open #compact-panel {
@@ -1776,7 +1781,21 @@ html[data-theme="monochrome"] #doc-preview-content.markdown-body blockquote {
   overflow: hidden;
   border: 1px solid var(--border);
 }
+#knowledge-panel,
+#experts-panel {
+  width: min(800px, calc(100vw - 40px));
+  max-height: min(720px, calc(100vh - 40px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+#experts-panel {
+  width: min(520px, calc(100vw - 40px));
+}
 #knowledge-panel-header,
+#experts-panel-header,
 #git-sync-panel-header,
 #help-panel-header {
   display: flex;
@@ -2435,4 +2454,117 @@ html[data-theme="light"] #usage-table tfoot th {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ===== Experts (领域) ===== */
+.experts-trigger {
+  position: relative;
+}
+.experts-trigger.has-experts {
+  color: var(--accent, var(--text1));
+}
+.experts-badge {
+  position: absolute;
+  top: -2px;
+  right: -6px;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  pointer-events: none;
+}
+#experts-panel .panel-scroll-body {
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+}
+.experts-hint {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+#experts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.experts-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text1);
+}
+.experts-item:hover {
+  background: var(--hover-bg);
+}
+.experts-item.is-picked {
+  background: var(--hover-bg);
+  font-weight: 600;
+}
+.experts-item input {
+  margin: 0;
+  accent-color: var(--accent, #2563eb);
+}
+.experts-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.experts-item-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+#experts-create-row {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+#experts-create-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text1);
+  font-size: 13px;
+}
+#experts-create-btn {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text1);
+  font-size: 13px;
+  cursor: pointer;
+}
+#experts-create-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+#experts-create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.experts-status {
+  margin-top: var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.experts-status.is-error {
+  color: var(--danger, #dc2626);
 }

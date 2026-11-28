@@ -100,6 +100,10 @@ export function createChatView({ state, documents, pickers, permissions, actions
                   <button id="doc-context-toggle" class="composer-action-btn" type="button" title="${documents.getAttachDocContext() ? "发送时附带当前浏览文件路径与选中文本（点击关闭）" : "已关闭：发送时不附带浏览文件路径与选中文本（点击开启）"}" aria-label="附带浏览文件上下文" aria-pressed="${documents.getAttachDocContext()}">
                     <i data-lucide="${documents.getAttachDocContext() ? "file" : "eye-off"}"></i>
                   </button>
+                  <button id="experts-btn" class="composer-action-btn experts-trigger" type="button" title="领域" aria-label="领域" aria-haspopup="dialog"${hasSession ? "" : " disabled"}>
+                    <i data-lucide="book-marked"></i>
+                    <span id="experts-badge" class="experts-badge" hidden></span>
+                  </button>
                   <span id="token-display" title="当前上下文长度"></span>
                   <span id="speed-display" title="生成速度（估算）"></span>
                 </div>
@@ -138,6 +142,8 @@ export function createChatView({ state, documents, pickers, permissions, actions
     actions.renderSessionList?.();
     actions.syncCompactButton();
     actions.updateTokenDisplay(state.latestUsage);
+    // 领域角标要跟着当前会话重画（composer 每次都会重建）。
+    actions.syncTrigger?.();
     people?.remount();
     reflections?.remount();
 
@@ -196,6 +202,10 @@ export function createChatView({ state, documents, pickers, permissions, actions
     document.getElementById("chat-home-btn")?.addEventListener("click", toggleChatHome);
     document.getElementById("usage-btn")?.addEventListener("click", openUsageModal);
     document.getElementById("knowledge-btn")?.addEventListener("click", openKnowledgeModal);
+    // 领域勾选按钮在 composer 里，每次重画都会重建，所以走委托。
+    document.getElementById("chat-panel")?.addEventListener("click", (event) => {
+      if (event.target.closest("#experts-btn")) actions.openExperts?.();
+    });
     bindStaticModalControls();
     // chat-title 双击重命名当前会话
     const title = document.getElementById("chat-title");

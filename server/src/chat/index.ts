@@ -39,6 +39,8 @@ import { foldDialogueState, historyAfterCursor } from "./dialogue-fold.js";
 import { buildDistillMapInjection } from "../distill/inject.js";
 import { markInjected } from "../memory/store.js";
 import { loadAppState } from "../app-state/index.js";
+import { EXPERTS_TOKEN_MAX, buildExpertsBlock } from "../experts/index.js";
+import type { ExpertsBlock } from "../experts/index.js";
 
 export { MEMORY_TOKEN_MAX };
 
@@ -68,6 +70,14 @@ export interface ChatOptions {
   checkPermission?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
   signal?: AbortSignal;
   omitTools?: boolean;
+  /**
+   * 这一轮是人物整理（手动或自动），不是对话。
+   *
+   * 整理走同一条 `chatStream`，只靠 `omitTools` 区分不够表达意图：
+   * 领域块必须在整理时显式跳过，否则整理模型会按「先澄清情绪」之类的
+   * 领域规矩去写简报（plan_experts §3）。
+   */
+  organizing?: boolean;
 }
 
 interface ChatRunSettings {
@@ -188,6 +198,7 @@ export function buildSystemBlocks(
   memoryText?: string | null,
   distillMap?: string | null,
   dialogueState?: string | null,
+  expertsText?: string | null,
 ): SystemBlock[] {
   const blocks: SystemBlock[] = [];
   if (rootIndex?.trim()) {
@@ -202,6 +213,11 @@ export function buildSystemBlocks(
   if (distillMap?.trim()) {
     blocks.push({ name: "distillMap", text: distillMap, max: DISTILL_MAP_TOKEN_MAX });
   }
+  // 领域块（plan_experts §3）：人勾选的立场与目录。自带上限、整块进或整块丢，
+  // 不参与块间淘汰——半段立场比不注入更危险。
+  if (expertsText?.trim()) {
+    blocks.push({ name: "experts", text: expertsText, max: EXPERTS_TOKEN_MAX });
+  }
   // 对话状态（context_governance_plan §2.2）：比记忆更「属于本次对话」，
   // 丢了会失去已经确立的结论与约束，所以排在记忆之后、policy 之前。
   if (dialogueState?.trim()) {
@@ -215,6 +231,9 @@ export function buildSystemBlocks(
 
 /** 策略块上限：固定策略本身不应无限膨胀，超了说明该拆分了。 */
 export const POLICY_TOKEN_MAX = 6000;
+
+/** 领域块上限（plan_experts §3）。装配逻辑在 `experts/index.ts`，这里转出便于消费方引用。 */
+export { EXPERTS_TOKEN_MAX } from "../experts/index.js";
 
 /**
  * 根索引块的 token 上限（plan §6.5 报表里 `max: 1000`）。
@@ -281,6 +300,25 @@ export async function loadDistillMapForInjection(
   return `# 蒸馏地图（可用摘要）\n\n${injection.text}`;
 }
 
+/**
+ * 领域块（plan_experts §3）。
+ *
+ * 两条硬约束：
+ * 1. **整理不带**。手动整理与自动整理走同一条 `chatStream`，靠 `organizing` 区分；
+ *    这里显式跳过，否则整理模型会按「先澄清情绪」之类的领域规矩去写简报。
+ * 2. **换一条会话就不带**。名单记在这条会话上，不记在全局开关里。
+ */
+export async function loadExpertsForInjection(
+  session: Session | null | undefined,
+  options: { organizing?: boolean; userDataDir?: string } = {},
+): Promise<ExpertsBlock | null> {
+  if (options.organizing) return null;
+  const ids = session?.experts;
+  if (!ids?.length) return null;
+  const block = await buildExpertsBlock(ids, { userDataDir: options.userDataDir }).catch(() => null);
+  return block?.text ? block : null;
+}
+
 type BudgetBuildInput = {
   config: Config;
   run: ChatRunSettings;
@@ -292,6 +330,8 @@ type BudgetBuildInput = {
   distillMap?: string | null;
   /** 心得会话的「当前有效」状态块（context_governance_plan §2.2）。为空则不注入。 */
   dialogueState?: string | null;
+  /** 领域块（plan_experts §3）。为空则不注入。 */
+  expertsText?: string | null;
   history: Message[];
   userMessage: Message;
   maxTokens: number;
@@ -317,6 +357,7 @@ function buildBudgetMessages(input: BudgetBuildInput): { messages: Message[]; re
       input.rootIndex,
       input.memoryText,
       input.distillMap,
+      input.expertsText,
       input.dialogueState,
     ),
     contextMaxTokens: input.config.contextMaxTokens,
@@ -914,6 +955,7 @@ export async function chat(
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
   const memory = await prepareMemory(extractTextContent(llmUserMessage.content));
   const distillMap = await loadDistillMapForInjection(config, memory.text);
+  const experts = await loadExpertsForInjection(session, { organizing: options.organizing === true });
   const budget = buildBudgetMessages({
     config,
     run,
@@ -921,6 +963,7 @@ export async function chat(
     rootIndex,
     memoryText: memory.text,
     distillMap,
+    expertsText: experts?.text,
     dialogueState: prepared.dialogueState,
     history: prepared.history,
     userMessage: llmUserMessage,
@@ -1046,6 +1089,8 @@ export async function* chatStream(
   const rootIndex = await loadRootIndexForInjection(config.injectRootIndex);
   const memory = await prepareMemory(extractTextContent(llmUserMessage.content));
   const distillMap = await loadDistillMapForInjection(config, memory.text);
+  // 整理（手动/自动）不带领域块：同一条 `chatStream`，靠 `organizing` 显式区分。
+  const experts = await loadExpertsForInjection(session, { organizing: options.organizing === true });
   const budget = buildBudgetMessages({
     config,
     run,
@@ -1053,6 +1098,7 @@ export async function* chatStream(
     rootIndex,
     memoryText: memory.text,
     distillMap,
+    expertsText: experts?.text,
     dialogueState: prepared.dialogueState,
     history: prepared.history,
     userMessage: llmUserMessage,

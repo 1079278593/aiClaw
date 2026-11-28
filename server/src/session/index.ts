@@ -9,6 +9,7 @@ import type { Message, Session } from "../types/index.js";
 import { getPaths, ensureDirectories } from "../config/paths.js";
 import { logger } from "../logger/index.js";
 import { loadAppState } from "../app-state/index.js";
+import { EXPERTS_MAX, normalizeExpertIds } from "../experts/index.js";
 
 const SESSION_METADATA_ROLE = "system";
 const DEFAULT_SESSION_TITLE = "New Chat";
@@ -37,6 +38,7 @@ function createMetadataMessage(session: Session): Message {
       lastThinkingEffort: session.lastThinkingEffort,
       ...(session.personId ? { personId: session.personId } : {}),
       ...(session.fold ? { fold: true } : {}),
+      ...(session.experts?.length ? { experts: session.experts } : {}),
     },
   };
 }
@@ -81,6 +83,7 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
     lastThinkingEffort?: string;
     personId?: string;
     fold?: boolean;
+    experts?: string[];
   } | null = null;
 
   for (const line of lines) {
@@ -96,6 +99,8 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
           lastThinkingEffort: msg.metadata?.lastThinkingEffort as string | undefined,
           personId: typeof msg.metadata?.personId === "string" && msg.metadata.personId ? msg.metadata.personId : undefined,
           fold: msg.metadata?.fold === true ? true : undefined,
+          // 读路径也要收敛：jsonl 是人可改的，写进去的字段不保证合法（plan_experts §4）。
+          experts: normalizeExpertIds(msg.metadata?.experts),
         };
       } else {
         messages.push(msg);
@@ -118,6 +123,7 @@ export async function loadSession(sessionId: string, userDataDir?: string): Prom
     lastThinkingEffort: sessionMeta?.lastThinkingEffort,
     personId: sessionMeta?.personId,
     fold: sessionMeta?.fold,
+    experts: sessionMeta?.experts,
   };
 }
 
@@ -181,6 +187,35 @@ export async function setSessionFold(sessionId: string, fold: boolean, userDataD
   session.fold = next;
   session.updatedAt = new Date().toISOString();
   await saveSession(session, userDataDir);
+  return session;
+}
+
+/**
+ * 设置这条会话勾选的领域（plan_experts §4）。
+ *
+ * `[]` 表示清空。只校验形状与数量，**不**校验目录是否存在：
+ * 领域目录可能被临时删掉再恢复，写名单不该因此失败；装配时读不到就跳过该段。
+ * 但路径段必须合法——`../people` 这类值进名单，等于把越界检查拖到每一轮。
+ */
+export async function setSessionExperts(
+  sessionId: string,
+  experts: string[],
+  userDataDir?: string,
+): Promise<Session> {
+  if (!Array.isArray(experts)) throw new Error("experts 必须是数组");
+  if (experts.length > EXPERTS_MAX) throw new Error(`一次最多勾选 ${EXPERTS_MAX} 个领域`);
+  const normalized = normalizeExpertIds(experts) ?? [];
+  if (normalized.length !== experts.length) {
+    throw new Error("领域名不合法或重复");
+  }
+
+  const session = await loadSession(sessionId, userDataDir);
+  const next = normalized.length > 0 ? normalized : undefined;
+  if (JSON.stringify(session.experts ?? []) === JSON.stringify(next ?? [])) return session;
+  session.experts = next;
+  session.updatedAt = new Date().toISOString();
+  await saveSession(session, userDataDir);
+  logger.info(`Session ${sessionId} experts: ${next?.join("、") ?? "(none)"}`);
   return session;
 }
 

@@ -563,6 +563,61 @@ describe("server", () => {
     expect(renameData.session.title).toBe("After Rename");
   });
 
+  it("sets experts via PATCH and keeps title-only requests unchanged", async () => {
+    const createRes = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Expert Session" }),
+    });
+    const { session } = await createRes.json() as { session: { id: string } };
+
+    // 先放一个领域目录：列表判据是「有非空 rules.md」。
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const knowledgeBase = path.join(testDir, "knowledge_base", "情感");
+    await mkdir(knowledgeBase, { recursive: true });
+    await writeFile(path.join(knowledgeBase, "rules.md"), "先澄清情绪。", "utf-8");
+
+    const listRes = await fetch(`http://127.0.0.1:${port}/api/experts`);
+    expect(listRes.status).toBe(200);
+    const listData = await listRes.json() as { experts: Array<{ id: string }> };
+    expect(listData.experts.map((item) => item.id)).toContain("情感");
+
+    const patchRes = await fetch(`http://127.0.0.1:${port}/api/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ experts: ["情感"] }),
+    });
+    expect(patchRes.status).toBe(200);
+    const patched = await patchRes.json() as { session: { experts?: string[] } };
+    expect(patched.session.experts).toEqual(["情感"]);
+
+    // 只改名不影响勾选：旧前端的行为必须保持。
+    const renameRes = await fetch(`http://127.0.0.1:${port}/api/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "改个名" }),
+    });
+    const renamed = await renameRes.json() as { session: { title: string; experts?: string[] } };
+    expect(renamed.session.title).toBe("改个名");
+    expect(renamed.session.experts).toEqual(["情感"]);
+  });
+
+  it("rejects a third expert instead of silently dropping one", async () => {
+    const createRes = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Too Many" }),
+    });
+    const { session } = await createRes.json() as { session: { id: string } };
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ experts: ["情感", "理财", "运动"] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("handles compaction route", async () => {
     mockCompactSession.mockResolvedValueOnce({ archivedAs: "test_archive.jsonl" });
     const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {

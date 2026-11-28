@@ -51,6 +51,17 @@ export function createChatFeature({
     if (!state.inputEl) return;
     const content = state.inputEl.value.trim();
     if ((!content && !state.pendingImages.length) || !state.currentSessionId) return;
+    // 勾选与发送几乎同时发生时，先等勾选落盘再装配。
+    // 否则会出现「界面已是理财、发出去的仍是情感」（plan_experts §4）。
+    const pendingSave = actions.flushExpertsBeforeSend?.();
+    if (pendingSave) {
+      void pendingSave.then(() => sendNow());
+      return;
+    }
+    sendNow();
+  }
+
+  function sendNow() {
     const images = state.pendingImages.map((image) => ({ url: image.url, path: image.path }));
     const person = state.panel === "people" ? state.personThread : null;
     const captureJob = person?.captureJob;
@@ -374,6 +385,8 @@ export function createChatFeature({
       renderer.renderMessages(session.messages);
     }
     syncCompactButton();
+    // 会话上的领域名单变了（换会话 / 别处改了）：角标与按钮跟着更新。
+    actions.syncTrigger?.();
   }
 
   function handleChatStart(message) {

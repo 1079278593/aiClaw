@@ -135,6 +135,10 @@ class SessionMachine {
     runtime.lastProvider = session['lastProvider'] as String?;
     runtime.lastModel = session['lastModel'] as String?;
     runtime.lastThinkingEffort = session['lastThinkingEffort'] as String?;
+    final experts = session['experts'];
+    runtime.experts = experts is List
+        ? experts.whereType<String>().toList(growable: false)
+        : null;
     final snapshot = parseHistory(session['messages']);
     if (!runtime.isStreaming && snapshot.length != runtime.messages.length) {
       _adoptSnapshot(runtime, snapshot);
@@ -272,4 +276,6 @@ class SessionRuntime {
   String? lastProvider;
   String? lastModel;
   String? lastThinkingEffort;
+  /// 本会话勾选的领域（plan_experts §4）。名单以服务端为准，界面上不写死。
+  List<String>? experts;
 }

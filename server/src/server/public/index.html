@@ -272,6 +272,35 @@
   </div>
 </div>
 
+<!-- ===== Experts (领域) Modal ===== -->
+<div id="experts-modal" role="dialog" aria-modal="true" aria-label="领域">
+  <div id="experts-panel">
+    <div id="experts-panel-header">
+      <div class="modal-title-group">
+        <span class="modal-title-icon"><i data-lucide="book-marked"></i></span>
+        <strong>领域</strong>
+      </div>
+      <button id="experts-close-btn" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-scroll-body">
+      <p class="experts-hint">勾上之后，这一轮会带上该领域的规则和目录，文章正文仍由 AI 按需打开。最多 2 个。</p>
+      <div id="experts-empty" class="empty-state" style="padding:16px 0" hidden>
+        <div class="empty-state-icon"><i data-lucide="book-marked"></i></div>
+        <p class="empty-state-title">还没有领域</p>
+        <p class="empty-state-copy">在 knowledge_base 下建一个子目录，写上 rules.md 就会出现在这里</p>
+      </div>
+      <div id="experts-list"></div>
+      <div id="experts-create-row">
+        <input id="experts-create-input" type="text" placeholder="新建领域名，如「情感」" maxlength="64" autocomplete="off">
+        <button id="experts-create-btn" type="button">新建</button>
+      </div>
+      <div id="experts-status" class="experts-status" hidden></div>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Help Modal ===== -->
 <div id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-panel-title">
   <div id="help-panel">
@@ -290,6 +319,7 @@
         <li><strong>左侧文件栏</strong>：顶部一行是 <code>knowledge_base</code> 与 <code>trilium</code> 两个根目录；心得、人物各自在顶部面板里。选中后下方显示目录树；点击目录可展开/收起，子目录自动缩进。点击文件在中间打开阅读。</li>
         <li><strong>中间阅读区</strong>：显示左侧打开的文档，可多标签切换；默认只读预览，点击“编辑”进入编辑模式（支持 Markdown 预览 / 图片查看）。</li>
         <li><strong>右侧聊天栏</strong>：顶栏第一行是＋新建对话按钮，下方为当前会话的对话与输入框。点击顶栏历史按钮可打开会话列表，切换/重命名/删除历史对话。</li>
+        <li><strong>领域</strong>：输入框左侧的书签按钮可勾选最多 2 个领域。勾上后这一轮会带上该领域的规则（<code>rules.md</code>）与目录（<code>index.md</code>），文章正文仍由 AI 按需打开。领域目录建在 <code>knowledge_base/&lt;领域名&gt;/</code>，在文档浏览器里改。</li>
       </ul>
 
       <h2>一般流程</h2>

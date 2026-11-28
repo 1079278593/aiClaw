@@ -22,10 +22,12 @@ import { loadAppState } from "../app-state/index.js";
 import { loadSession } from "../session/index.js";
 import {
   DISTILL_MAP_TOKEN_MAX,
+  EXPERTS_TOKEN_MAX,
   POLICY_TOKEN_MAX,
   ROOT_INDEX_TOKEN_MAX,
 } from "../chat/index.js";
 import { getPaths } from "../config/paths.js";
+import { buildExpertsBlock } from "../experts/index.js";
 import { OVERVIEW_BYTE_MAX, distillRoot } from "../distill/store.js";
 import { buildMemoryInjection } from "../memory/inject.js";
 import { layerFile, readLayer } from "../memory/store.js";
@@ -281,9 +283,12 @@ export async function collectContextSources(options: {
   // （`session.fold`），没有指定会话时退回心得那条，保持旧页面的显示不变。
   const requestedSessionId = options.sessionId?.trim();
   let foldSessionId: string | undefined;
+  let expertsSource: { ids: string[] } | undefined;
   if (requestedSessionId) {
     const target = await loadSession(requestedSessionId).catch(() => null);
     if (target?.fold) foldSessionId = target.id;
+    // 领域块只对「这一条会话」成立，不传会话就不列。
+    if (target?.experts?.length) expertsSource = { ids: target.experts };
   }
   foldSessionId ??= (await loadAppState(userDataDir).catch(() => null))?.reflectionsSessionId;
   if (foldSessionId) {
@@ -300,6 +305,24 @@ export async function collectContextSources(options: {
       readonlyReason: "由折叠流程按会话写入；手改会与游标不一致",
       content: current,
       max: DIALOGUE_STATE_TOKEN_MAX,
+    }));
+  }
+
+  // ---- 2.6 领域块（plan_experts §3）----
+  // 只对当前这条会话成立：名单存在会话 metadata 上，不传会话就不列。
+  if (expertsSource) {
+    const block = await buildExpertsBlock(expertsSource.ids, { userDataDir }).catch(() => null);
+    sources.push(makeSource({
+      id: "experts",
+      label: `领域（${expertsSource.ids.join("、")}）`,
+      abs: paths.knowledgeBase,
+      userDataDir,
+      role: "勾选的领域：该领域的 rules.md 全文加 index.md 目录；文章正文不带，由模型用 read 打开",
+      always: false,
+      editable: false,
+      readonlyReason: "内容以 knowledge_base/<领域>/ 下的文件为准，在此手改会与文件分叉",
+      content: block?.text ?? "",
+      max: EXPERTS_TOKEN_MAX,
     }));
   }
 

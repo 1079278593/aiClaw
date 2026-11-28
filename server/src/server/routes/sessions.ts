@@ -8,6 +8,7 @@ import {
   listSessions,
   loadSession,
   renameSession,
+  setSessionExperts,
   setSessionFold,
   truncateSession,
 } from "../../session/index.js";
@@ -44,12 +45,46 @@ export const handleSessionRoutes: RouteHandler = async ({ req, res, url, config,
     return true;
   }
   if (directMatch && req.method === "PATCH") {
+    let data: { title?: unknown; experts?: unknown };
     try {
-      const data = await readJsonBody<{ title: string }>(req);
-      sendJson(res, { session: await renameSession(directMatch[1], data.title) });
+      data = await readJsonBody<{ title?: unknown; experts?: unknown }>(req);
+    } catch {
+      sendJson(res, { error: "无效的请求" }, 400);
+      return true;
+    }
+    // 两个字段都缺 → 400。只带 `title` 时行为与改动前完全一致，
+    // 旧前端（只改名）不受影响（plan_experts §4）。
+    const hasTitle = Object.prototype.hasOwnProperty.call(data, "title");
+    const hasExperts = Object.prototype.hasOwnProperty.call(data, "experts");
+    if (!hasTitle && !hasExperts) {
+      sendJson(res, { error: "需要 title 或 experts" }, 400);
+      return true;
+    }
+    if (hasExperts && !Array.isArray(data.experts)) {
+      sendJson(res, { error: "experts 必须是数组" }, 400);
+      return true;
+    }
+
+    try {
+      const sessionId = directMatch[1];
+      // 先做可能失败的那一步：标题为空要先拒绝，否则会出现
+      // 「勾选已经写进 jsonl、标题却非法」的半成功。
+      if (hasTitle && !String(data.title ?? "").trim()) {
+        sendJson(res, { error: "Session title is required" }, 400);
+        return true;
+      }
+      let session = await loadSession(sessionId);
+      if (hasExperts) session = await setSessionExperts(sessionId, data.experts as string[]);
+      if (hasTitle) session = await renameSession(sessionId, String(data.title));
+      // 勾选是会话的一部分：广播一次，其它端同步看到。
+      broadcast(toSessionMessage(session));
+      sendJson(res, { session });
     } catch (error) {
-      const message = (error as Error).message || "Failed to rename session";
-      sendJson(res, { error: message }, message === "Session title is required" ? 400 : 500);
+      const message = (error as Error).message || "Failed to update session";
+      const badRequest = message === "Session title is required"
+        || message.includes("最多勾选")
+        || message.includes("领域名不合法");
+      sendJson(res, { error: message }, badRequest ? 400 : 500);
     }
     return true;
   }

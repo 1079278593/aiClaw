@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../src/api_client.dart';
 import '../src/app_controller.dart';
 import '../src/chat_models.dart';
+import 'experts_sheet.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -96,6 +97,21 @@ class _ChatPageState extends State<ChatPage> {
               if (widget.onHistory != null)
                 IconButton(onPressed: widget.onHistory, icon: const Icon(Icons.history), tooltip: '历史会话'),
               IconButton(onPressed: () => _pickModel(context), icon: const Icon(Icons.tune), tooltip: '模型'),
+              IconButton(
+                onPressed: () => showExpertsSheet(
+                  context,
+                  controller: widget.controller,
+                  sessionId: widget.sessionId,
+                ),
+                icon: Badge(
+                  isLabelVisible: (runtime.experts?.isNotEmpty ?? false),
+                  label: Text('${runtime.experts?.length ?? 0}'),
+                  child: const Icon(Icons.bookmarks_outlined),
+                ),
+                tooltip: runtime.experts?.isNotEmpty == true
+                    ? '领域：${runtime.experts!.join('、')}'
+                    : '领域',
+              ),
               PopupMenuButton<String>(
                 onSelected: (value) {
                   if (value == 'compact') _compact();

@@ -140,6 +140,7 @@ export function handleWebSocketConnection(
               lastProvider: session.lastProvider,
               lastModel: session.lastModel,
               lastThinkingEffort: session.lastThinkingEffort,
+              ...(session.experts?.length ? { experts: session.experts } : {}),
             },
           });
           logger.debug(`Client joined session: ${message.sessionId}`);

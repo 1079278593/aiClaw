@@ -55,6 +55,8 @@ export type ServerMessage =
         lastProvider?: string;
         lastModel?: string;
         lastThinkingEffort?: string;
+        /** 本会话勾选的领域，最多 2 个。下发白名单，漏了界面上看不到（plan_experts §4）。 */
+        experts?: string[];
       };
     }
   | { type: "chatStart"; sessionId: string; runId: string; sequence: number; userMessageId?: string }

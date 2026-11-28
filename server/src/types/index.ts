@@ -54,6 +54,13 @@ export interface Session {
    * 否则模型会忘掉这个情境里已经做过的取舍（plan_people_reply §5）。
    */
   fold?: boolean;
+  /**
+   * 本会话勾选的领域（`knowledge_base/<id>/` 目录名），最多 2 个。
+   *
+   * 只存目录名，不存文件内容：每轮现读 `rules.md` 与 `index.md`，改文件后
+   * 下一轮生效。装配与限额见 `chat/experts.ts`（plan_experts §3）。
+   */
+  experts?: string[];
 }
 
 // Config types - re-export from config module

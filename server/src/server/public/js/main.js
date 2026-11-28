@@ -18,6 +18,7 @@ import { ensureAccessTokenGate, fetchHealth, setAccessToken } from "./access-tok
 import { createPeopleFeature } from "./features/people.js";
 import { createReflectionsFeature } from "./features/reflections.js";
 import { createPendingFeature } from "./features/pending.js";
+import { createExpertsFeature } from "./features/experts.js";
 
 const state = createAppState();
 const actions = {};
@@ -42,11 +43,12 @@ const pickers = createPickerFeature({
 const people = createPeopleFeature({ state, actions });
 const reflections = createReflectionsFeature({ state, actions });
 const pending = createPendingFeature({ state, actions });
+const experts = createExpertsFeature({ state, actions });
 const view = createChatView({ state, documents, pickers, permissions, actions, people, reflections });
 const chat = createChatFeature({ state, socket, renderer, streaming, pickers, permissions, documents, actions });
 const sessions = createSessionFeature({ state, socket, renderer, pickers, permissions, actions });
 
-Object.assign(actions, view, chat, sessions, {
+Object.assign(actions, view, chat, sessions, experts, {
   appendTypingDots: streaming.appendTypingDots,
   peopleRemount: () => people.remount(),
   reflectionsRemount: () => reflections.remount(),
@@ -117,6 +119,7 @@ function bindGlobalEvents() {
   people.bind();
   reflections.bind();
   pending.bind();
+  experts.bind();
   // Render initial static lucide icons
   window.lucide?.createIcons();
 }

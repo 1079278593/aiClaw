@@ -202,6 +202,7 @@ export async function processChatMessage(options: {
       userMessageId,
       signal: controller.signal,
       omitTools: organizing,
+      organizing,
       onToolCall: (name, input, callId) => sendChatEvent({ type: "toolCall", name, input, callId }),
       onToolResult: (name, resultContent, isError, callId) => sendChatEvent({ type: "toolResult", name, content: resultContent, isError, callId }),
       onLoopProgress: (progress) =>

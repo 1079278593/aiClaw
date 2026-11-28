@@ -386,6 +386,50 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     await _refreshSessions();
   }
 
+  /// 可勾选的领域（plan_experts §4）。判据在服务端：有非空 `rules.md` 的子目录。
+  Future<List<String>> loadExperts() => _guard(_loadExperts());
+
+  Future<List<String>> _loadExperts() async {
+    final payload = await api.getJson(apiUri(baseUrl, '/api/experts'), token: token);
+    final raw = payload['experts'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => '${item['id'] ?? ''}')
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  /// 新建领域。服务端一次性建目录、`rules.md` 与空的 `index.md`，已存在则拒绝。
+  Future<void> createExpert(String id) => _guard(_createExpert(id));
+
+  Future<void> _createExpert(String id) async {
+    await api.sendJson(
+      'POST',
+      apiUri(baseUrl, '/api/experts'),
+      token: token,
+      body: {'id': id},
+    );
+  }
+
+  /// 设置这条会话勾选的领域。`[]` 表示清空。
+  ///
+  /// 服务端会再校验一次数量与路径段；这里先挡住明显的错误，避免一次无用往返。
+  Future<void> setSessionExperts(String id, List<String> experts) =>
+      _guard(_setSessionExperts(id, experts));
+
+  Future<void> _setSessionExperts(String id, List<String> experts) async {
+    if (experts.length > 2) throw ArgumentError('最多勾选 2 个领域');
+    await api.sendJson(
+      'PATCH',
+      apiUri(baseUrl, '/api/sessions/$id'),
+      token: token,
+      body: {'experts': experts},
+    );
+    machine.runtimeOf(id).experts = experts.isEmpty ? null : List<String>.from(experts);
+    notifyListeners();
+  }
+
   Future<void> deleteSession(String id) => _guard(_deleteSession(id));
 
   Future<void> _deleteSession(String id) async {
