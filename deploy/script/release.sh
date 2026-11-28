@@ -84,6 +84,21 @@ publish_nas() {
   "${ROOT}/deploy/script/docker-export-for-nas.sh" --quick
 }
 
+# 发版前的环境预检。
+#
+# 为什么要有这一步：`run_all` 是「先提交、再发布」。如果 Docker 没开，
+# 提交已经落盘、发布却当场退出，留下一个「已提交但没推送」的半完成状态——
+# 换台机器或重建工作区就会丢。所以把可能失败的环境检查提到提交之前：
+# 环境没准备好就一条命令都不执行，而不是做一半。
+preflight_nas() {
+  command -v docker >/dev/null 2>&1 || fail "未找到 docker。请先打开 Docker Desktop，它只用来构建镜像。"
+  docker info >/dev/null 2>&1 || fail "Docker 未运行（本机 Mac 的 Docker Desktop）。先打开它，再重跑；不会提交任何东西。"
+  # 快速发版把 tar 直接写到 NAS 挂载点；没挂载的话会在构建完成后才失败，白等一轮。
+  # 与 docker-export-for-nas.sh 的 NAS_EXPORT_DIR 保持一致。
+  local nas_dir="${AICLAW_NAS_EXPORT_DIR:-/Volumes/docker/aiclaw}"
+  [[ -d "$nas_dir" ]] || fail "NAS 挂载目录不存在：${nas_dir}。先在 Finder 里连上 NAS，再重跑；不会提交任何东西。"
+}
+
 publish_nas_menu() {
   echo "[release] NAS：1 快速发版，2 只导出 tar"
   "${ROOT}/deploy/script/docker-export-for-nas.sh"
@@ -107,6 +122,8 @@ commit_and_push() {
 
 run_all() {
   local message=""
+  # 先校验环境，再提交：否则 Docker 没开时只做完「提交」这一半。
+  preflight_nas
   if dirty; then
     message="$(ask_message)"
     commit_with "$message"
